@@ -2,13 +2,19 @@
 <html>
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Space Guy</title>
   <script src="https://cjrtnc.leaningtech.com/4.3/loader.js"></script>
+  <style>
+    html, body { margin: 0; background: #000; }
+    #container { width: 100vw; height: 100vh; }
+  </style>
 </head>
 <body>
+  <div id="container"></div>
   <script type="module">
     await cheerpjInit();
-    cheerpjCreateDisplay(-1, -1);
+    cheerpjCreateDisplay(-1, -1, document.getElementById("container"));
     await cheerpjRunJar("/app/SpaceGuy.jar");
   </script>
 </body>
