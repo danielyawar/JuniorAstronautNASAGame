@@ -5,6 +5,7 @@ import static outpost.view.Mesh.p;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.FontMetrics;
@@ -12,10 +13,11 @@ import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
-import java.awt.geom.Ellipse2D;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
-import java.awt.geom.RoundRectangle2D;
+import java.awt.geom.Rectangle2D;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -25,15 +27,22 @@ import java.util.Random;
 import java.util.function.Consumer;
 import javax.swing.JPanel;
 import outpost.shared.GameState;
+import outpost.shared.Glyphs;
+import outpost.shared.Phase;
+import outpost.shared.PlayerActions;
 import outpost.shared.PowerAllocation;
+import outpost.shared.PowerUse;
 import outpost.shared.RadiationConditions;
+import outpost.shared.SolReport;
 import outpost.shared.UvIndex;
 import outpost.shared.WeatherConditions;
 
 /**
  * The angled bird's-eye view of the outpost: a low-poly model of the real ground around
  * Curiosity's landing site, with the outpost buildings on it. Everything that changes is
- * drawn from the GameState snapshot; painting never changes anything.
+ * drawn from the GameState snapshot; painting never changes anything. The view is also
+ * the controls: the player clicks the solar panels to collect energy, clicks the habitat
+ * or the greenhouse to spend it, and clicks END SOL. Each click is passed to PlayerActions.
  *
  * <p>What is real: the ground heights (NASA MOLA) and the compass direction. What is not:
  * heights are drawn {@value #HEIGHT_EXAGGERATION} times taller than true scale so the
@@ -87,7 +96,22 @@ public final class OutpostView extends JPanel {
 
     private record Rock(double u, double v, double size, int sides, double turn, double tone) {}
 
-    private record Label(double x, double y, Color accent, String title, String[] lines) {}
+    private record Label(double x, double y, Color accent, String title, String[] lines, Spot spot) {}
+
+    /** Things on screen that can be clicked. */
+    private enum Spot { NONE, HABITAT, GREENHOUSE, SOLAR, COLLECT, END_SOL, RESTART, PLAY_AGAIN, CARD, MINUS, PLUS }
+
+    /** What is under the mouse. {@code use} is set for the MINUS and PLUS buttons of a card. */
+    private record Hit(Spot spot, PowerUse use) {}
+
+    private static final Hit NOTHING = new Hit(Spot.NONE, null);
+
+    /** One line of a building's card: a use of energy with its minus and plus buttons. */
+    private record Stepper(PowerUse use, double top, Rectangle2D minus, Rectangle2D plus) {}
+
+    /** The box of controls that opens over a building when it is clicked. */
+    private record Card(Rectangle2D box, double anchorX, double anchorY, String title, Color accent,
+                        List<Stepper> rows) {}
 
     private final transient Terrain terrain;
     private final int tiles;
@@ -96,9 +120,22 @@ public final class OutpostView extends JPanel {
     /** Camera for the buildings: the ground camera enlarged by SITE_SCALE about the habitat. */
     private final transient Projection site;
     private final transient List<Rock> rocks = new ArrayList<>();
+    private final transient PlayerActions actions;
+    /** Screen positions (in the 800 x 600 layout) the building labels point at. */
+    private final double[] habitatAnchor;
+    private final double[] greenhouseAnchor;
+    private final double[] solarAnchor;
+    private final transient List<Rectangle2D> habitatArea;
+    private final transient List<Rectangle2D> greenhouseArea;
+    private final transient List<Rectangle2D> solarArea;
     private transient GameState state;
+    /** The building whose card is open: HABITAT, GREENHOUSE or NONE. */
+    private Spot selected = Spot.NONE;
+    private transient Hit hover = NOTHING;
 
-    public OutpostView() {
+    /** @param actions receives what the player clicks */
+    public OutpostView(PlayerActions actions) {
+        this.actions = actions;
         terrain = Terrain.load();
         tiles = terrain.size - 1;
         ground = new double[tiles + 1][tiles + 1];
@@ -138,7 +175,51 @@ public final class OutpostView extends JPanel {
             }
         }
         rocks.sort(Comparator.comparingDouble(r -> r.u() + r.v()));
+        habitatAnchor = new double[] {site.x(HAB_U, HAB_V), site.y(HAB_U, HAB_V, 2.05)};
+        greenhouseAnchor = new double[] {
+            site.x(GREENHOUSE_U + 1.5, GREENHOUSE_V), site.y(GREENHOUSE_U + 1.5, GREENHOUSE_V, 1.25)};
+        solarAnchor = new double[] {
+            site.x(SOLAR_U + 1.8, SOLAR_V + 0.9), site.y(SOLAR_U + 1.8, SOLAR_V + 0.9, 1.05)};
+        habitatArea = List.of(labelArea(habitatAnchor), screenBox(HAB_U - HAB_RADIUS, HAB_V - HAB_RADIUS,
+                HAB_U + HAB_RADIUS, HAB_V + HAB_RADIUS, 1.7));
+        greenhouseArea = List.of(labelArea(greenhouseAnchor), screenBox(GREENHOUSE_U, GREENHOUSE_V - 0.85,
+                GREENHOUSE_U + 3, GREENHOUSE_V + 0.85, 1.0));
+        solarArea = List.of(labelArea(solarAnchor), screenBox(SOLAR_U, SOLAR_V,
+                SOLAR_U + 3.55, SOLAR_V + 1.95, 0.8));
+
         setPreferredSize(new Dimension(WIDTH, HEIGHT));
+        MouseAdapter mouse = new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                click(hitAt(e));
+            }
+
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                point(hitAt(e));
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                point(NOTHING);
+            }
+        };
+        addMouseListener(mouse);
+        addMouseMotionListener(mouse);
+    }
+
+    /** The screen rectangle around a box standing on the site, from ground level up to {@code height}. */
+    private Rectangle2D screenBox(double u0, double v0, double u1, double v1, double height) {
+        double left = site.x(u0, v1);
+        double right = site.x(u1, v0);
+        double top = site.y(u0, v0, height);
+        double bottom = site.y(u1, v1, 0);
+        return new Rectangle2D.Double(left, top, right - left, bottom - top);
+    }
+
+    /** Roughly where a building's label is drawn, so the label can be clicked as well. */
+    private static Rectangle2D labelArea(double[] anchor) {
+        return new Rectangle2D.Double(anchor[0] - 62, anchor[1] - 56, 124, 56);
     }
 
     /** Called by the controller wiring whenever the state changes. */
@@ -182,6 +263,8 @@ public final class OutpostView extends JPanel {
             for (Label label : labels) {
                 paintLabel(g, label);
             }
+            paintCollectButton(g);
+            paintCard(g);
             paintHud(g);
         } finally {
             g.dispose();
@@ -275,8 +358,10 @@ public final class OutpostView extends JPanel {
 
     private void paintObjects(Graphics2D g, double brightness, List<Label> labels) {
         PowerAllocation power = state.allocation();
+        PowerAllocation limit = state.limit();
         WeatherConditions weather = state.weather();
         RadiationConditions radiation = state.radiation();
+        SolReport forecast = state.forecast();
 
         // Rocks first: none stands in front of a building, so none can be painted over wrongly.
         Mesh scenery = new Mesh(CAMERA, brightness);
@@ -289,8 +374,10 @@ public final class OutpostView extends JPanel {
         List<Item> items = new ArrayList<>();
         items.add(new Item(WEATHER_U + WEATHER_V, this::weatherStation));
         items.add(new Item(DETECTOR_U + DETECTOR_V, mesh -> detector(mesh, radiation.solarEvent())));
-        items.add(new Item(HAB_U + HAB_V, mesh -> habitat(mesh, power.shielding(), power.heating())));
-        items.add(new Item(GREENHOUSE_U + GREENHOUSE_V + 1.5, mesh -> greenhouse(mesh, power.greenhouse())));
+        items.add(new Item(HAB_U + HAB_V, mesh -> habitat(mesh,
+                share(power.shielding(), limit.shielding()), share(power.heating(), limit.heating()))));
+        items.add(new Item(GREENHOUSE_U + GREENHOUSE_V + 1.5, mesh -> greenhouse(mesh,
+                share(power.greenhouse(), limit.greenhouse()))));
         items.add(new Item(SOLAR_U + SOLAR_V + 2.5, mesh -> solarArray(mesh, weather.sunlight())));
         items.add(new Item(ROVER_U + ROVER_V, this::rover));
         items.sort(Comparator.comparingDouble(Item::depth));
@@ -300,41 +387,55 @@ public final class OutpostView extends JPanel {
             mesh.paint(g);
         }
 
-        labels.add(label(WEATHER_U, WEATHER_V, 1.75, SKY_BLUE, "Weather station",
+        labels.add(label(site.x(WEATHER_U, WEATHER_V), site.y(WEATHER_U, WEATHER_V, 1.75),
+                Spot.NONE, SKY_BLUE, "Weather station",
                 String.format(Locale.ENGLISH, "Low %.0f°C   High %.0f°C",
                         weather.minTempC(), weather.maxTempC()),
                 Double.isNaN(weather.pressurePa()) ? null
                         : String.format(Locale.ENGLISH, "Air pressure %.0f Pa", weather.pressurePa())));
-        labels.add(label(DETECTOR_U, DETECTOR_V, 1.0, radiation.solarEvent() ? ALERT : Color.WHITE,
+        labels.add(label(site.x(DETECTOR_U, DETECTOR_V), site.y(DETECTOR_U, DETECTOR_V, 1.0),
+                Spot.NONE, radiation.solarEvent() ? ALERT : Color.WHITE,
                 radiation.solarEvent() ? "Solar storm!" : "Radiation",
                 String.format(Locale.ENGLISH, "%.2f mSv today", radiation.doseMsv())));
-        labels.add(label(HAB_U, HAB_V, 2.05, WARM, "Habitat",
-                "Shield " + power.shielding() + "%   Heat " + power.heating() + "%"));
-        labels.add(label(GREENHOUSE_U + 1.5, GREENHOUSE_V, 1.25, LEAF_GREEN, "Greenhouse",
-                "Power " + power.greenhouse() + "%"));
-        labels.add(label(SOLAR_U + 1.8, SOLAR_V + 0.9, 1.05, SUN_YELLOW, "Solar panels",
-                String.format(Locale.ENGLISH, "Sunlight %.0f%%", weather.sunlight() * 100)));
+        if (selected != Spot.HABITAT) {
+            labels.add(label(habitatAnchor[0], habitatAnchor[1], Spot.HABITAT, WARM, "Habitat",
+                    "Heat " + power.heating() + " of " + limit.heating() + "   Shield " + power.shielding()));
+        }
+        if (selected != Spot.GREENHOUSE) {
+            labels.add(label(greenhouseAnchor[0], greenhouseAnchor[1], Spot.GREENHOUSE, LEAF_GREEN, "Greenhouse",
+                    String.format(Locale.ENGLISH, "Energy %d   Grows %.1f food",
+                            power.greenhouse(), forecast.foodGrown())));
+        }
+        labels.add(label(solarAnchor[0], solarAnchor[1], state.collected() ? Spot.NONE : Spot.SOLAR,
+                SUN_YELLOW, "Solar panels",
+                String.format(Locale.ENGLISH, "Sunlight %.0f%%", weather.sunlight() * 100),
+                state.collected() ? "Collected " + state.solarOutput() + " energy today"
+                        : "Made " + state.solarOutput() + " energy today"));
     }
 
-    private Label label(double u, double v, double above, Color accent, String title, String... lines) {
+    /** Energy spent on a use as a share of the most it can take, 0.0 to 1.0. */
+    private static double share(int spent, int most) {
+        return most <= 0 ? 0 : Math.min(1.0, spent / (double) most);
+    }
+
+    private static Label label(double x, double y, Spot spot, Color accent, String title, String... lines) {
         List<String> kept = new ArrayList<>();
         for (String line : lines) {
             if (line != null) {
                 kept.add(line);
             }
         }
-        return new Label(site.x(u, v), site.y(u, v, above), accent, title,
-                kept.toArray(new String[0]));
+        return new Label(x, y, accent, title, kept.toArray(new String[0]), spot);
     }
 
     /**
      * The crew's home: a faceted dome on a ring wall. A bank of Mars soil is piled around it
-     * as a radiation shield, taller the more power goes to shielding, and the windows glow
-     * warmer the more power goes to heating.
+     * as a radiation shield, taller the more energy goes to shielding, and the windows glow
+     * warmer the nearer the heating is to what the night needs. Both shares are 0.0 to 1.0.
      */
-    private void habitat(Mesh mesh, int shielding, int heating) {
+    private void habitat(Mesh mesh, double shielding, double heating) {
         double h0 = 0;
-        double bankHeight = 1.15 * shielding / 100.0;
+        double bankHeight = 1.15 * shielding;
         if (shielding > 0) {
             for (int k = 6; k <= 13; k++) {
                 bank(mesh, h0, bankHeight, k);
@@ -344,7 +445,7 @@ public final class OutpostView extends JPanel {
         int segments = 12;
         double wall = 0.34;
         double[] inside = p(HAB_U, HAB_V, h0 + wall);
-        Color window = mix(new Color(64, 84, 118), new Color(255, 200, 96), heating / 60.0);
+        Color window = mix(new Color(64, 84, 118), new Color(255, 200, 96), heating);
         for (int k = 0; k < segments; k++) {
             double a0 = k * 2 * Math.PI / segments;
             double a1 = (k + 1) * 2 * Math.PI / segments;
@@ -409,8 +510,8 @@ public final class OutpostView extends JPanel {
                 ringPoint(a1, crest, h0 + height), ringPoint(a1, inner, h0 + height));
     }
 
-    /** A glass tunnel of crops. The rows turn from bare soil to green as it gets more power. */
-    private void greenhouse(Mesh mesh, int powerShare) {
+    /** A glass tunnel of crops. The rows turn from bare soil to green as it gets more energy. */
+    private void greenhouse(Mesh mesh, double powerShare) {
         double u0 = GREENHOUSE_U;
         double u1 = GREENHOUSE_U + 3.0;
         double radius = 0.85;
@@ -419,8 +520,8 @@ public final class OutpostView extends JPanel {
         mesh.box(u0 - 0.08, GREENHOUSE_V - radius - 0.08, h0, 3.16, 2 * radius + 0.16, 0.14, METAL);
         mesh.sheet(new Color(104, 74, 56), p(u0, GREENHOUSE_V - radius, floor), p(u1, GREENHOUSE_V - radius, floor),
                 p(u1, GREENHOUSE_V + radius, floor), p(u0, GREENHOUSE_V + radius, floor));
-        Color crop = mix(new Color(136, 104, 70), new Color(58, 176, 72), powerShare / 60.0);
-        double cropHeight = 0.05 + 0.3 * Math.min(1, powerShare / 60.0);
+        Color crop = mix(new Color(136, 104, 70), new Color(58, 176, 72), powerShare);
+        double cropHeight = 0.05 + 0.3 * powerShare;
         for (int row = 0; row < 3; row++) {
             double v = GREENHOUSE_V - 0.62 + row * 0.47;
             mesh.box(u0 + 0.15, v, floor, 2.7, 0.3, cropHeight, crop);
@@ -546,48 +647,319 @@ public final class OutpostView extends JPanel {
         g.setStroke(new BasicStroke(0.8f));
     }
 
-    // ---- Text -----------------------------------------------------------------------
+    // ---- Text and controls ----------------------------------------------------------
+
+    private static final Font TITLE_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 12);
+    private static final Font BODY_FONT = new Font(Font.SANS_SERIF, Font.PLAIN, 11);
+    private static final Font BIG_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 17);
+    private static final Color EDGE = new Color(255, 255, 255, 80);
+    private static final Color MUTED = new Color(196, 200, 214);
+    private static final Color EMPTY_CELL = new Color(62, 66, 88);
+
+    private static final Rectangle2D END_SOL_BUTTON = new Rectangle2D.Double(656, 524, 132, 34);
+    private static final Rectangle2D RESTART_BUTTON = new Rectangle2D.Double(574, 530, 74, 28);
+    private static final Rectangle2D PLAY_AGAIN_BUTTON = new Rectangle2D.Double(335, 322, 130, 34);
+
+    /** A square-cornered box with a one-pixel edge, snapped to whole pixels so it stays crisp. */
+    private static void box(Graphics2D g, double x, double y, double width, double height, Color fill, Color edge) {
+        double left = Math.round(x);
+        double top = Math.round(y);
+        double w = Math.round(width);
+        double h = Math.round(height);
+        g.setColor(fill);
+        g.fill(new Rectangle2D.Double(left, top, w, h));
+        if (edge != null) {
+            g.setStroke(new BasicStroke(1f));
+            g.setColor(edge);
+            g.draw(new Rectangle2D.Double(left + 0.5, top + 0.5, w - 1, h - 1));
+        }
+    }
+
+    private static Color alpha(Color colour, int alpha) {
+        return new Color(colour.getRed(), colour.getGreen(), colour.getBlue(), alpha);
+    }
+
+    private static void centred(Graphics2D g, String text, double centreX, double baseline) {
+        g.drawString(text, (float) (centreX - g.getFontMetrics().stringWidth(text) / 2.0), (float) baseline);
+    }
+
+    private void pointer(Graphics2D g, double x, double bottom) {
+        Path2D.Double pointer = new Path2D.Double();
+        pointer.moveTo(x - 6, bottom - 1);
+        pointer.lineTo(x + 6, bottom - 1);
+        pointer.lineTo(x, bottom + 7);
+        pointer.closePath();
+        g.setColor(BUBBLE);
+        g.fill(pointer);
+    }
 
     private void paintLabel(Graphics2D g, Label label) {
-        Font titleFont = new Font(Font.SANS_SERIF, Font.BOLD, 12);
-        Font lineFont = new Font(Font.SANS_SERIF, Font.PLAIN, 11);
-        FontMetrics titleMetrics = g.getFontMetrics(titleFont);
-        FontMetrics lineMetrics = g.getFontMetrics(lineFont);
+        FontMetrics titleMetrics = g.getFontMetrics(TITLE_FONT);
+        FontMetrics lineMetrics = g.getFontMetrics(BODY_FONT);
         int width = titleMetrics.stringWidth(label.title());
         for (String line : label.lines()) {
             width = Math.max(width, lineMetrics.stringWidth(line));
         }
         width += 18;
         int height = 20 + 14 * label.lines().length;
-        double left = label.x() - width / 2.0;
-        double top = label.y() - height - 7;
+        double top = Math.round(label.y() - height - 7);
 
-        Path2D.Double pointer = new Path2D.Double();
-        pointer.moveTo(label.x() - 6, top + height - 1);
-        pointer.lineTo(label.x() + 6, top + height - 1);
-        pointer.lineTo(label.x(), top + height + 7);
-        pointer.closePath();
-        g.setColor(BUBBLE);
-        g.fill(pointer);
-        g.fill(new RoundRectangle2D.Double(left, top, width, height, 12, 12));
-        g.setFont(titleFont);
+        // A label that can be clicked has an edge in its own colour, brighter under the mouse.
+        boolean clickable = label.spot() != Spot.NONE;
+        Color edge = !clickable ? EDGE
+                : hover.spot() == label.spot() ? label.accent() : alpha(label.accent(), 150);
+        pointer(g, label.x(), top + height);
+        box(g, label.x() - width / 2.0, top, width, height, BUBBLE, edge);
+        g.setFont(TITLE_FONT);
         g.setColor(label.accent());
-        g.drawString(label.title(), (float) (label.x() - titleMetrics.stringWidth(label.title()) / 2.0),
-                (float) (top + 15));
-        g.setFont(lineFont);
+        centred(g, label.title(), label.x(), top + 15);
+        g.setFont(BODY_FONT);
         g.setColor(Color.WHITE);
         for (int i = 0; i < label.lines().length; i++) {
-            String line = label.lines()[i];
-            g.drawString(line, (float) (label.x() - lineMetrics.stringWidth(line) / 2.0),
-                    (float) (top + 29 + 14 * i));
+            centred(g, label.lines()[i], label.x(), top + 29 + 14 * i);
         }
     }
+
+    /** A flat button. {@code bolt} adds the energy icon before the text. */
+    private void button(Graphics2D g, Rectangle2D area, String text, Color fill, Spot spot,
+                        boolean enabled, boolean bolt) {
+        boolean hot = enabled && hover.spot() == spot;
+        Color face = !enabled ? new Color(86, 88, 100) : hot ? Mesh.scale(fill, 1.12) : fill;
+        box(g, area.getX(), area.getY(), area.getWidth(), area.getHeight(), face,
+                hot ? Color.WHITE : new Color(20, 22, 34));
+        Color ink = enabled ? new Color(24, 26, 38) : new Color(150, 152, 164);
+        g.setFont(TITLE_FONT);
+        double centre = area.getCenterX() + (bolt ? 8 : 0);
+        if (bolt) {
+            double textWidth = g.getFontMetrics().stringWidth(text);
+            Glyphs.bolt(g, centre - textWidth / 2 - 17, area.getCenterY() - 7, 14, ink);
+        }
+        g.setColor(ink);
+        centred(g, text, centre, area.getCenterY() + 4.5);
+    }
+
+    /** Where the COLLECT button sits: just above the solar panels' label. */
+    private Rectangle2D collectButton() {
+        double labelTop = Math.round(solarAnchor[1] - 48 - 7);
+        return new Rectangle2D.Double(Math.round(solarAnchor[0]) - 66, labelTop - 32, 132, 28);
+    }
+
+    private void paintCollectButton(Graphics2D g) {
+        if (!state.collected() && state.phase() == Phase.PLAYING) {
+            button(g, collectButton(), "COLLECT +" + state.solarOutput(), Glyphs.POWER, Spot.COLLECT, true, true);
+        }
+    }
+
+    // ---- Building cards -------------------------------------------------------------
+
+    private static final double CARD_WIDTH = 252;
+    private static final double CARD_HEAD = 26;
+    private static final double CARD_ROW = 46;
+
+    /** The card for the selected building, or null when none is open. Used to paint and to click. */
+    private Card card() {
+        if (state == null || state.phase() != Phase.PLAYING || selected == Spot.NONE) {
+            return null;
+        }
+        boolean habitat = selected == Spot.HABITAT;
+        double[] anchor = habitat ? habitatAnchor : greenhouseAnchor;
+        PowerUse[] uses = habitat
+                ? new PowerUse[] {PowerUse.HEAT, PowerUse.SHIELD} : new PowerUse[] {PowerUse.GREENHOUSE};
+        double height = CARD_HEAD + CARD_ROW * uses.length + 4;
+        double left = Math.round(Math.max(6, Math.min(WIDTH - 6 - CARD_WIDTH, anchor[0] - CARD_WIDTH / 2)));
+        double top = Math.round(Math.max(6, anchor[1] - 7 - height));
+        List<Stepper> rows = new ArrayList<>();
+        for (int i = 0; i < uses.length; i++) {
+            double rowTop = top + CARD_HEAD + CARD_ROW * i;
+            double right = left + CARD_WIDTH - 10;
+            rows.add(new Stepper(uses[i], rowTop,
+                    new Rectangle2D.Double(right - 94, rowTop + 3, 24, 22),
+                    new Rectangle2D.Double(right - 24, rowTop + 3, 24, 22)));
+        }
+        return new Card(new Rectangle2D.Double(left, top, CARD_WIDTH, height), anchor[0], anchor[1],
+                habitat ? "Habitat" : "Greenhouse", habitat ? WARM : LEAF_GREEN, rows);
+    }
+
+    private void paintCard(Graphics2D g) {
+        Card card = card();
+        if (card == null) {
+            return;
+        }
+        Rectangle2D area = card.box();
+        PowerAllocation power = state.allocation();
+        PowerAllocation limit = state.limit();
+        SolReport forecast = state.forecast();
+        pointer(g, card.anchorX(), area.getMaxY());
+        box(g, area.getX(), area.getY(), area.getWidth(), area.getHeight(), new Color(24, 28, 44), card.accent());
+        g.setFont(TITLE_FONT);
+        g.setColor(card.accent());
+        g.drawString(card.title(), (float) area.getX() + 10, (float) area.getY() + 17);
+        g.setFont(BODY_FONT);
+        g.setColor(MUTED);
+        String battery = state.energy() + " energy left";
+        g.drawString(battery, (float) (area.getMaxX() - 10 - g.getFontMetrics().stringWidth(battery)),
+                (float) area.getY() + 17);
+
+        for (Stepper row : card.rows()) {
+            int spent = power.get(row.use());
+            int most = limit.get(row.use());
+            String name;
+            String effect;
+            double iconX = area.getX() + 10;
+            double iconY = row.top() + 7;
+            switch (row.use()) {
+                case HEAT:
+                    Glyphs.flame(g, iconX, iconY, 14, Glyphs.HEAT);
+                    name = "Heat";
+                    effect = forecast.heatShort() > 0
+                            ? String.format(Locale.ENGLISH, "Tonight falls to %.0f°C. Needs %d more.",
+                                    state.weather().minTempC(), forecast.heatShort())
+                            : String.format(Locale.ENGLISH, "Warm enough for tonight's %.0f°C.",
+                                    state.weather().minTempC());
+                    break;
+                case SHIELD:
+                    Glyphs.shield(g, iconX, iconY, 14, Glyphs.SHIELD);
+                    name = "Shield";
+                    effect = String.format(Locale.ENGLISH, "Stops %.0f%% of today's radiation.",
+                            forecast.shieldBlocked() * 100);
+                    break;
+                default:
+                    Glyphs.leaf(g, iconX, iconY, 14, Glyphs.GREENHOUSE);
+                    name = "Grow food";
+                    effect = String.format(Locale.ENGLISH, "Grows %.1f days of food. Crew eats %.0f a day.",
+                            forecast.foodGrown(), forecast.foodEaten());
+                    break;
+            }
+            g.setFont(TITLE_FONT);
+            g.setColor(Color.WHITE);
+            g.drawString(name, (float) iconX + 20, (float) row.top() + 19);
+            stepperButton(g, row.minus(), "-", Spot.MINUS, row.use(),
+                    spent > 0 && state.energy() < state.energyCapacity());
+            stepperButton(g, row.plus(), "+", Spot.PLUS, row.use(), state.energy() > 0 && spent < most);
+            g.setFont(TITLE_FONT);
+            g.setColor(Color.WHITE);
+            centred(g, spent + " of " + most, (row.minus().getMaxX() + row.plus().getX()) / 2, row.top() + 19);
+            g.setFont(BODY_FONT);
+            g.setColor(MUTED);
+            g.drawString(effect, (float) iconX, (float) row.top() + 39);
+        }
+    }
+
+    private void stepperButton(Graphics2D g, Rectangle2D area, String sign, Spot spot, PowerUse use,
+                               boolean enabled) {
+        boolean hot = enabled && hover.spot() == spot && hover.use() == use;
+        Color face = !enabled ? new Color(70, 72, 86) : hot ? Color.WHITE : Glyphs.POWER;
+        box(g, area.getX(), area.getY(), area.getWidth(), area.getHeight(), face, new Color(20, 22, 34));
+        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 15));
+        g.setColor(enabled ? new Color(24, 26, 38) : new Color(128, 130, 144));
+        centred(g, sign, area.getCenterX(), area.getCenterY() + 5);
+    }
+
+    // ---- Mouse ----------------------------------------------------------------------
+
+    /** What is under the mouse, in the 800 x 600 layout the scene is drawn in. */
+    private Hit hitAt(MouseEvent e) {
+        if (state == null) {
+            return NOTHING;
+        }
+        double scale = Math.min(getWidth() / (double) WIDTH, getHeight() / (double) HEIGHT);
+        double x = (e.getX() - (getWidth() - WIDTH * scale) / 2) / scale;
+        double y = (e.getY() - (getHeight() - HEIGHT * scale) / 2) / scale;
+        if (state.phase() != Phase.PLAYING) {
+            return PLAY_AGAIN_BUTTON.contains(x, y) ? new Hit(Spot.PLAY_AGAIN, null) : NOTHING;
+        }
+        Card card = card();
+        if (card != null && card.box().contains(x, y)) {
+            for (Stepper row : card.rows()) {
+                if (row.minus().contains(x, y)) {
+                    return new Hit(Spot.MINUS, row.use());
+                }
+                if (row.plus().contains(x, y)) {
+                    return new Hit(Spot.PLUS, row.use());
+                }
+            }
+            return new Hit(Spot.CARD, null);
+        }
+        if (END_SOL_BUTTON.contains(x, y)) {
+            return new Hit(Spot.END_SOL, null);
+        }
+        if (RESTART_BUTTON.contains(x, y)) {
+            return new Hit(Spot.RESTART, null);
+        }
+        if (!state.collected() && collectButton().contains(x, y)) {
+            return new Hit(Spot.COLLECT, null);
+        }
+        if (within(habitatArea, x, y)) {
+            return new Hit(Spot.HABITAT, null);
+        }
+        if (within(greenhouseArea, x, y)) {
+            return new Hit(Spot.GREENHOUSE, null);
+        }
+        if (!state.collected() && within(solarArea, x, y)) {
+            return new Hit(Spot.SOLAR, null);
+        }
+        return NOTHING;
+    }
+
+    private static boolean within(List<Rectangle2D> areas, double x, double y) {
+        for (Rectangle2D area : areas) {
+            if (area.contains(x, y)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void click(Hit hit) {
+        switch (hit.spot()) {
+            case COLLECT:
+            case SOLAR:
+                actions.collect();
+                break;
+            case HABITAT:
+            case GREENHOUSE:
+                selected = hit.spot();
+                break;
+            case PLUS:
+                actions.spend(hit.use(), 1);
+                break;
+            case MINUS:
+                actions.spend(hit.use(), -1);
+                break;
+            case END_SOL:
+                selected = Spot.NONE;
+                actions.nextSol();
+                break;
+            case RESTART:
+            case PLAY_AGAIN:
+                selected = Spot.NONE;
+                actions.restart();
+                break;
+            case CARD:
+                break;
+            default:
+                selected = Spot.NONE;
+                break;
+        }
+        repaint();
+    }
+
+    private void point(Hit hit) {
+        if (!hit.equals(hover)) {
+            hover = hit;
+            boolean hand = hit.spot() != Spot.NONE && hit.spot() != Spot.CARD;
+            setCursor(Cursor.getPredefinedCursor(hand ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
+            repaint();
+        }
+    }
+
+    // ---- Heads-up display -----------------------------------------------------------
 
     private void paintHud(Graphics2D g) {
         WeatherConditions weather = state.weather();
         RadiationConditions radiation = state.radiation();
 
-        // Top left: which day it is, and where the weather reading comes from.
+        // Top left: which day it is, where the weather reading comes from, and how the crew is.
         List<String> day = new ArrayList<>();
         day.add("Earth date " + DATE.format(state.sol().earthDate()));
         if (weather.measuredOn() == null) {
@@ -597,9 +969,12 @@ public final class OutpostView extends JPanel {
         } else {
             day.add("No rover reading today. Showing " + DATE.format(weather.measuredOn()));
         }
-        panel(g, 12, 12, false, "Sol " + state.sol().number(), Color.WHITE, day);
+        double dayBottom = panel(g, 12, 12, false,
+                "Sol " + state.sol().number() + " of " + state.missionSols(), Color.WHITE, day);
+        paintVitals(g, 12, dayBottom + 6);
 
-        // Top right: daylight.
+        // Top right: the battery, then daylight.
+        double energyBottom = paintEnergy(g, WIDTH - 12, 12);
         List<String> light = new ArrayList<>();
         if (weather.sunrise() != null && weather.sunset() != null) {
             light.add("Sunrise " + weather.sunrise() + "   Sunset " + weather.sunset());
@@ -608,27 +983,23 @@ public final class OutpostView extends JPanel {
             light.add("UV light: " + weather.uv().label());
         }
         String sky = weather.sunlight() < 0.5 ? "Dusty sky" : "Clear sky";
-        panel(g, WIDTH - 12, 12, true, sky, SUN_YELLOW, light);
+        panel(g, WIDTH - 12, energyBottom + 6, true, sky, SUN_YELLOW, light);
 
         if (radiation.solarEvent() && radiation.detail() != null) {
-            Font font = new Font(Font.SANS_SERIF, Font.BOLD, 12);
-            FontMetrics metrics = g.getFontMetrics(font);
-            int width = metrics.stringWidth(radiation.detail()) + 24;
-            g.setColor(new Color(110, 20, 70, 230));
-            g.fill(new RoundRectangle2D.Double((WIDTH - width) / 2.0, 80, width, 24, 12, 12));
-            g.setFont(font);
+            g.setFont(TITLE_FONT);
+            int width = g.getFontMetrics().stringWidth(radiation.detail()) + 24;
+            box(g, (WIDTH - width) / 2.0, 140, width, 24, new Color(110, 20, 70, 235), ALERT);
             g.setColor(Color.WHITE);
-            g.drawString(radiation.detail(), (WIDTH - width) / 2f + 12, 96);
+            centred(g, radiation.detail(), WIDTH / 2.0, 156);
         }
 
         // Landmark and compass. North is toward the lower left in this view.
         g.setFont(new Font(Font.SANS_SERIF, Font.ITALIC, 11));
         g.setColor(new Color(60, 30, 20, 210));
-        g.drawString("Lower slopes of Mount Sharp", 420, 64);
-        double cx = 742;
-        double cy = 482;
-        g.setColor(BUBBLE);
-        g.fill(new Ellipse2D.Double(cx - 24, cy - 24, 48, 48));
+        g.drawString("Lower slopes of Mount Sharp", 380, 30);
+        double cx = 764;
+        double cy = 488;
+        box(g, cx - 24, cy - 24, 48, 48, BUBBLE, EDGE);
         Path2D.Double needle = new Path2D.Double();
         needle.moveTo(cx - 5, cy + 9);
         needle.lineTo(cx + 15, cy + 5);
@@ -639,6 +1010,12 @@ public final class OutpostView extends JPanel {
         g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 11));
         g.drawString("N", (float) cx - 17, (float) cy + 4);
 
+        if (state.phase() == Phase.PLAYING) {
+            paintAdvice(g);
+            button(g, END_SOL_BUTTON, "END SOL  >", Glyphs.GOOD, Spot.END_SOL, true, false);
+            button(g, RESTART_BUTTON, "Restart", new Color(190, 194, 206), Spot.RESTART, true, false);
+        }
+
         g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 10));
         g.setColor(new Color(255, 244, 232, 235));
         g.drawString("Real NASA data, saved copy (not live).  Weather: Curiosity rover, NASA/JPL-Caltech/CAB.  "
@@ -647,32 +1024,179 @@ public final class OutpostView extends JPanel {
                 "Ground: real heights at Curiosity's landing site in Gale Crater, NASA MOLA.  "
                         + "One tile is about %.1f km.  Hills drawn %dx taller.  Buildings not to scale.",
                 terrain.spacingM / 1000, HEIGHT_EXAGGERATION), 12, HEIGHT - 9);
+
+        if (state.phase() != Phase.PLAYING) {
+            paintEnding(g);
+        }
     }
 
-    /** A dark rounded box of text anchored at its top-left corner, or top-right if {@code alignRight}. */
-    private void panel(Graphics2D g, double x, double y, boolean alignRight, String title,
-                       Color titleColour, List<String> lines) {
-        Font titleFont = new Font(Font.SANS_SERIF, Font.BOLD, 17);
-        Font lineFont = new Font(Font.SANS_SERIF, Font.PLAIN, 11);
-        FontMetrics titleMetrics = g.getFontMetrics(titleFont);
-        FontMetrics lineMetrics = g.getFontMetrics(lineFont);
+    /**
+     * A dark square-cornered box of text anchored at its top-left corner, or top-right if
+     * {@code alignRight}. Returns the y of its bottom edge.
+     */
+    private double panel(Graphics2D g, double x, double y, boolean alignRight, String title,
+                         Color titleColour, List<String> lines) {
+        FontMetrics titleMetrics = g.getFontMetrics(BIG_FONT);
+        FontMetrics lineMetrics = g.getFontMetrics(BODY_FONT);
         int width = titleMetrics.stringWidth(title);
         for (String line : lines) {
             width = Math.max(width, lineMetrics.stringWidth(line));
         }
         width += 22;
         int height = 30 + 14 * lines.size();
-        double left = alignRight ? x - width : x;
-        g.setColor(BUBBLE);
-        g.fill(new RoundRectangle2D.Double(left, y, width, height, 14, 14));
-        g.setFont(titleFont);
+        double left = Math.round(alignRight ? x - width : x);
+        box(g, left, y, width, height, BUBBLE, EDGE);
+        g.setFont(BIG_FONT);
         g.setColor(titleColour);
         g.drawString(title, (float) left + 11, (float) y + 21);
-        g.setFont(lineFont);
+        g.setFont(BODY_FONT);
         g.setColor(Color.WHITE);
         for (int i = 0; i < lines.size(); i++) {
             g.drawString(lines.get(i), (float) left + 11, (float) y + 37 + 14 * i);
         }
+        return y + height;
+    }
+
+    /** The battery: how much energy is stored, one cell per unit. Returns the y of its bottom edge. */
+    private double paintEnergy(Graphics2D g, double right, double y) {
+        int capacity = state.energyCapacity();
+        int cell = 9;
+        int gap = 2;
+        double width = 20 + capacity * cell + (capacity - 1) * gap;
+        double left = right - width;
+        box(g, left, y, width, 52, BUBBLE, Glyphs.POWER);
+        Glyphs.bolt(g, left + 9, y + 7, 15, Glyphs.POWER);
+        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
+        g.setColor(Glyphs.POWER);
+        g.drawString("ENERGY", (float) left + 28, (float) y + 20);
+        String amount = state.energy() + " / " + capacity;
+        g.setColor(Color.WHITE);
+        g.drawString(amount, (float) (right - 10 - g.getFontMetrics().stringWidth(amount)), (float) y + 20);
+
+        // Cells that would fill if today's solar energy were collected are shown as outlines.
+        int waiting = state.collected() || state.phase() != Phase.PLAYING ? state.energy()
+                : Math.min(capacity, state.energy() + state.solarOutput());
+        for (int i = 0; i < capacity; i++) {
+            double cellX = left + 10 + i * (cell + gap);
+            Color fill = i < state.energy() ? Glyphs.POWER : EMPTY_CELL;
+            box(g, cellX, y + 29, cell, 14, fill, i >= state.energy() && i < waiting ? Glyphs.POWER : null);
+        }
+        return y + 52;
+    }
+
+    /** Crew health and food, each with what tonight will do to it. */
+    private void paintVitals(Graphics2D g, double x, double y) {
+        SolReport forecast = state.forecast();
+        boolean playing = state.phase() == Phase.PLAYING;
+        box(g, x, y, 270, 48, BUBBLE, EDGE);
+        Glyphs.heart(g, x + 10, y + 7, 13, Glyphs.HEALTH);
+        vital(g, x, y + 5, "Crew health", state.crewHealth() / 100, Glyphs.HEALTH,
+                String.format(Locale.ENGLISH, "%.0f", state.crewHealth()),
+                playing ? forecast.healthAfter() - state.crewHealth() : 0);
+        Glyphs.leaf(g, x + 10, y + 27, 13, Glyphs.GREENHOUSE);
+        vital(g, x, y + 25, "Food (days)", state.foodDays() / 10, Glyphs.GREENHOUSE,
+                String.format(Locale.ENGLISH, "%.1f", state.foodDays()),
+                playing ? forecast.foodAfter() - state.foodDays() : 0);
+    }
+
+    private void vital(Graphics2D g, double x, double y, String name, double share, Color colour,
+                       String value, double change) {
+        g.setFont(BODY_FONT);
+        g.setColor(Color.WHITE);
+        g.drawString(name, (float) x + 28, (float) y + 13);
+        box(g, x + 98, y + 5, 60, 8, EMPTY_CELL, null);
+        box(g, x + 98, y + 5, 60 * clamp(share), 8, colour, null);
+        g.setFont(TITLE_FONT);
+        g.drawString(value, (float) x + 165, (float) y + 13);
+        if (Math.abs(change) >= 0.05) {
+            g.setFont(BODY_FONT);
+            g.setColor(change < 0 ? Glyphs.BAD : Glyphs.GOOD);
+            g.drawString(String.format(Locale.ENGLISH, "%+.1f tonight", change), (float) x + 195, (float) y + 13);
+        }
+    }
+
+    /** Bottom left: what to do next, and what ending the sol now would do and why. */
+    private void paintAdvice(Graphics2D g) {
+        SolReport forecast = state.forecast();
+        String next;
+        if (!state.collected()) {
+            next = "Click COLLECT on the solar panels.";
+        } else if (forecast.heatShort() > 0 && state.energy() > 0) {
+            next = "The habitat will be cold tonight. Click it.";
+        } else if (state.energy() > 0 && forecast.foodGrown() == 0) {
+            next = "Click the greenhouse to grow food.";
+        } else {
+            next = "Spend more, or save it and press END SOL.";
+        }
+
+        List<String> lines = new ArrayList<>();
+        List<Color> colours = new ArrayList<>();
+        lines.add("If the sol ends now:");
+        colours.add(MUTED);
+        lines.add(String.format(Locale.ENGLISH, "Radiation  %+.1f health", forecast.healthRadiation())
+                + (forecast.shieldBlocked() > 0
+                        ? String.format(Locale.ENGLISH, "  (shield stops %.0f%%)", forecast.shieldBlocked() * 100)
+                        : "  (no shield)"));
+        colours.add(state.radiation().solarEvent() ? ALERT : Glyphs.WARN);
+        if (forecast.heatShort() > 0) {
+            lines.add(String.format(Locale.ENGLISH, "Cold  %+.1f health  (heat is %d short)",
+                    forecast.healthCold(), forecast.heatShort()));
+            colours.add(Glyphs.BAD);
+        }
+        if (forecast.hungry()) {
+            lines.add(String.format(Locale.ENGLISH, "Hunger  %+.1f health  (not enough food)",
+                    forecast.healthHunger()));
+            colours.add(Glyphs.BAD);
+        }
+        if (forecast.healthRest() > 0) {
+            lines.add(String.format(Locale.ENGLISH, "Warm and fed  %+.1f health", forecast.healthRest()));
+            colours.add(Glyphs.GOOD);
+        }
+        lines.add(String.format(Locale.ENGLISH, "Food  grows %.1f, crew eats %.1f",
+                forecast.foodGrown(), forecast.foodEaten()));
+        colours.add(forecast.foodGrown() >= forecast.foodEaten() ? Glyphs.GOOD : Color.WHITE);
+
+        int width = g.getFontMetrics(TITLE_FONT).stringWidth(next);
+        for (String line : lines) {
+            width = Math.max(width, g.getFontMetrics(BODY_FONT).stringWidth(line));
+        }
+        width += 22;
+        int height = 28 + 14 * lines.size();
+        double top = 562 - height;
+        box(g, 12, top, width, height, BUBBLE, Glyphs.POWER);
+        g.setFont(TITLE_FONT);
+        g.setColor(Glyphs.POWER);
+        g.drawString(next, 23, (float) top + 17);
+        g.setFont(BODY_FONT);
+        for (int i = 0; i < lines.size(); i++) {
+            g.setColor(colours.get(i));
+            g.drawString(lines.get(i), 23, (float) top + 34 + 14 * i);
+        }
+    }
+
+    /** The end of the mission: what happened, and a button to play again. */
+    private void paintEnding(Graphics2D g) {
+        boolean won = state.phase() == Phase.WON;
+        SolReport last = state.forecast();
+        g.setColor(new Color(10, 10, 20, 130));
+        g.fillRect(-WIDTH, -HEIGHT, 3 * WIDTH, 3 * HEIGHT);
+        box(g, 170, 214, 460, 158, new Color(24, 28, 44), won ? Glyphs.GOOD : Glyphs.BAD);
+        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 22));
+        g.setColor(won ? Glyphs.GOOD : Glyphs.BAD);
+        centred(g, won ? "Mission complete!" : "Mission over", WIDTH / 2.0, 248);
+        g.setFont(TITLE_FONT);
+        g.setColor(Color.WHITE);
+        if (won) {
+            centred(g, "The crew stayed safe for all " + state.missionSols() + " sols.", WIDTH / 2.0, 274);
+            centred(g, String.format(Locale.ENGLISH, "Crew health %.0f.  Food left: %.1f days.",
+                    state.crewHealth(), state.foodDays()), WIDTH / 2.0, 294);
+        } else {
+            centred(g, "The crew's health ran out on sol " + state.sol().number() + " and they had to go home.",
+                    WIDTH / 2.0, 274);
+            centred(g, String.format(Locale.ENGLISH, "Last night:  radiation %+.1f   cold %+.1f   hunger %+.1f",
+                    last.healthRadiation(), last.healthCold(), last.healthHunger()), WIDTH / 2.0, 294);
+        }
+        button(g, PLAY_AGAIN_BUTTON, "PLAY AGAIN", Glyphs.POWER, Spot.PLAY_AGAIN, true, false);
     }
 
     private static double clamp(double value) {
