@@ -15,7 +15,9 @@
   <script type="module">
     await cheerpjInit({version: 17});
     cheerpjCreateDisplay(-1, -1, document.getElementById("container"));
-    await cheerpjRunJar("/app/JuniorAstronautNASAGame/SpaceGuy.jar");
+    // CheerpJ maps the site root to /app. Resolve the jar next to this page so the
+    // same file works on GitHub Pages and on a local server.
+    await cheerpjRunJar("/app" + new URL("SpaceGuy.jar", location.href).pathname);
   </script>
 </body>
 </html>
