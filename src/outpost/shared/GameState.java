@@ -1,23 +1,31 @@
 package outpost.shared;
 
+import java.util.List;
+
 /**
  * Immutable snapshot of everything the panels may display. Only GameController creates these.
  *
- * @param allocation     energy spent on each use so far this sol
- * @param limit          most energy each use can take this sol; more would change nothing
- * @param phase          PLAYING, WON or LOST
- * @param missionSols    sols the crew must last
- * @param energy         energy in the battery, ready to spend
+ * <p>While {@code phase} is BRIEFING the home screen is showing and there is no mission:
+ * {@code scenarios}, {@code missionSols} and {@code energyCapacity} are set and everything
+ * else is null or false. In every other phase all of it is set except {@code night}, which
+ * is null until the first night has passed.
+ *
+ * @param phase          where the player is: see {@link Phase}
+ * @param missionSols    sols the astronaut must last
+ * @param mission        the mission being played, for the mission-start card
+ * @param sol            the sol being played. While the phase is DAWN it is the sol about to start.
+ * @param weather        the sol's weather
+ * @param radiation      the sol's radiation
+ * @param outpost        the battery, the stores, the astronaut and the switches, as they are now
+ * @param now            what the instruments read now
+ * @param night          what the last night did, from the moment the astronaut went to bed
+ *                       to sunrise. Once the mission is over, what its last night did.
  * @param energyCapacity most energy the battery holds
- * @param solarOutput    energy the solar panels make this sol
- * @param collected      true once the player has collected this sol's solar energy
- * @param heatNeed       energy the habitat needs tonight to stay warm
- * @param crewHealth     0 to 100
- * @param foodDays       days of food in store
- * @param forecast       what happens if the sol ends with the current spending; once the
- *                       mission is over, what happened on its last sol
+ * @param paused         true while the view has asked for the clock to stand still
+ * @param scenarios      the missions the home screen offers, from the gentlest to the hardest,
+ *                       so the first is the one to start with; empty once one is chosen
  */
-public record GameState(Sol sol, WeatherConditions weather, RadiationConditions radiation,
-                        PowerAllocation allocation, PowerAllocation limit, Phase phase, int missionSols,
-                        int energy, int energyCapacity, int solarOutput, boolean collected,
-                        int heatNeed, double crewHealth, double foodDays, SolReport forecast) {}
+public record GameState(Phase phase, int missionSols, Scenario mission, Sol sol,
+                        WeatherConditions weather, RadiationConditions radiation,
+                        Outpost outpost, Readings now, Tally night,
+                        double energyCapacity, boolean paused, List<Scenario> scenarios) {}
