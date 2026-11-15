@@ -11,9 +11,13 @@ files and what the modules may rely on. The game design is in `PLAN.md`.
    into the battery, shown top right. The battery holds 20 and carries over between sols.
 2. Click the **habitat** or the **greenhouse**. A card opens with plus and minus buttons:
    heat and shield on the habitat, growing food on the greenhouse. Each press moves one energy.
-3. The box at the bottom left says what ending the sol now would do to the crew and why.
+3. The box at the bottom left says what to do next, and what tonight will do to the crew's
+   health and why. The totals are beside the health and food bars in the top strip.
 4. Click **END SOL**. The crew eats, health changes, spent energy is used up, and the next
    sol begins. Solar energy that was not collected is lost.
+
+Clicking the **weather station** or the **radiation detector** opens a card with the day's
+readings. Clicking anywhere else closes a card.
 
 The mission is won by ending sol 30 with crew health above 0, and lost when health reaches 0.
 All the numbers are in `Rules.java` and are game rules, not NASA figures.
@@ -136,19 +140,34 @@ Restart returns to the first sol with an empty battery, full health and 5 days o
 
 ## How the view shows the state
 
+The screen is kept quiet by giving every fact one home, in one of three places:
+
+- **The strip along the top** holds what the player is looking after: the sol, crew health,
+  food and energy.
+- **A one-line tag over each building** holds the one or two numbers that matter for today's
+  choices.
+- **A building's card**, opened by clicking it, holds everything else about it.
+
+Before adding something to the screen, look for the place it already belongs. Only add to
+the strip or to a tag if the player needs it to choose how to spend energy.
+
 | State | In the view |
 |---|---|
-| `sunlight` | Solar panel colour, brightness of the whole scene, dust haze, "Clear sky" or "Dusty sky" |
-| `minTempC`, `maxTempC`, `pressurePa` | Weather station label |
-| `sunrise`, `sunset`, `uv` | Top-right box |
-| `measuredOn`, `missionSol` | Top-left box. Says so when the rover has no reading for the date. |
-| `doseMsv`, `solarEvent`, `detail` | Radiation detector label and light, pink streaks, banner with the storm's details |
-| `allocation.shielding` | Height of the soil bank around the habitat |
-| `allocation.heating` | Glow of the habitat windows, brightest when the night's need is met |
-| `allocation.greenhouse` | Colour and height of the crop rows |
-| `energy`, `solarOutput`, `collected` | Energy bar, top right. Outlined cells are today's energy waiting to be collected. COLLECT button over the solar panels. |
-| `crewHealth`, `foodDays`, `forecast` | Bars under the sol box, each with tonight's change; the reasons, bottom left |
+| `sunlight` | Solar panel colour, brightness of the whole scene, dust haze. The weather tag is headed "Dusty sky" below 50%. The percentage is on the weather station's card. |
+| `minTempC` | Weather tag ("-71°C tonight"), and the heat line of the habitat's card |
+| `maxTempC`, `pressurePa`, `sunrise`, `sunset`, `uv` | Weather station's card |
+| `measuredOn`, `missionSol` | Weather station's card. The weather tag adds "no reading today" when the rover has no reading for the date. |
+| `doseMsv`, `solarEvent`, `detail` | Radiation tag and the detector's light and card, pink streaks, banner under the top strip with the storm's details |
+| `allocation.shielding` | Height of the soil bank around the habitat; habitat tag |
+| `allocation.heating` | Glow of the habitat windows, brightest when the night's need is met; habitat tag, red while the night's need is not met |
+| `allocation.greenhouse` | Colour and height of the crop rows; greenhouse tag |
+| `energy`, `solarOutput`, `collected` | Energy bar in the top strip. The outlined part is today's energy waiting to be collected. COLLECT button over the solar panels, replaced by a tag once collected. |
+| `crewHealth`, `foodDays`, `forecast` | Bars in the top strip, each with tonight's change: the end of the bar that tonight takes away is faded, and what tonight adds is an outline. The reasons for the change in health, bottom left. What grows and what is eaten, on the greenhouse's card. |
 | `phase` | Mission complete or mission over box with PLAY AGAIN |
+
+The guide at the bottom left names one thing to do next, and the tag of the building it
+names is ringed in the same yellow. The data sources are credited in one line at the bottom;
+the "About the data" button opens the full credits and the notes on scale.
 
 The view is laid out at 800 x 600 and scales to fit its panel. It has no animation: it
 repaints only when the state changes or the mouse moves onto or off something clickable.
@@ -170,6 +189,7 @@ repaints only when the state changes or the mouse moves onto or off something cl
 - **Sol-to-date mapping.** One sol is treated as one Earth day. A real sol is 24 h 39 min,
   so about one Earth date in 37 has no rover row; the game then shows the previous row and
   says so. Dates after the archive ends show its last row, also labelled.
-- **Text for young readers, credits screen.** The view credits each source in two lines at
-  the bottom; the wording has not been written for a 7-year-old.
+- **Text for young readers, credits screen.** The view credits each source in one line at
+  the bottom and in the "About the data" card; the wording has not been written for a
+  7-year-old.
 - **Tests.** There are none.
