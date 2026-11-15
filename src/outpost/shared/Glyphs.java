@@ -17,7 +17,6 @@ public final class Glyphs {
 
     public static final Color SHIELD = new Color(150, 150, 255);
     public static final Color GREENHOUSE = new Color(112, 214, 112);
-    public static final Color HEAT = new Color(255, 160, 84);
     public static final Color POWER = new Color(255, 212, 84);
     public static final Color HEALTH = new Color(255, 104, 124);
     public static final Color GOOD = new Color(122, 224, 132);
@@ -65,20 +64,6 @@ public final class Glyphs {
         g.setStroke(new BasicStroke((float) (size * 0.09), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
         g.draw(new Line2D.Double(x + size * 0.04, y + size * 0.98, x + size * 0.3, y + size * 0.7));
         g.setStroke(old);
-    }
-
-    /** Flame: heating. */
-    public static void flame(Graphics2D g, double x, double y, double size, Color colour) {
-        Path2D.Double path = new Path2D.Double();
-        path.moveTo(0.5, 0.0);
-        path.curveTo(0.62, 0.3, 0.98, 0.48, 0.84, 0.78);
-        path.quadTo(0.72, 1.0, 0.5, 1.0);
-        path.quadTo(0.26, 1.0, 0.16, 0.78);
-        path.curveTo(0.04, 0.54, 0.26, 0.42, 0.3, 0.26);
-        path.quadTo(0.4, 0.38, 0.42, 0.46);
-        path.quadTo(0.52, 0.3, 0.5, 0.0);
-        path.closePath();
-        fill(g, x, y, size, colour, path);
     }
 
     /** Five-pointed star: mission rating. */

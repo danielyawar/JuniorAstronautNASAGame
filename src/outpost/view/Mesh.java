@@ -73,24 +73,38 @@ final class Mesh {
 
     void paint(Graphics2D g) {
         for (Face face : faces) {
-            Path2D.Double path = new Path2D.Double();
-            for (int i = 0; i < face.points().length; i++) {
-                double[] q = face.points()[i];
-                double x = projection.x(q[0], q[1]);
-                double y = projection.y(q[0], q[1], q[2]);
-                if (i == 0) {
-                    path.moveTo(x, y);
-                } else {
-                    path.lineTo(x, y);
-                }
-            }
-            path.closePath();
+            Path2D.Double path = outline(face);
             g.setColor(face.colour());
             g.fill(path);
             if (face.colour().getAlpha() == 255) {
                 g.draw(path); // hides the hairline gaps antialiasing leaves between faces
             }
         }
+    }
+
+    /** The shape on screen of every face, in the order they were added. */
+    List<Path2D.Double> outlines() {
+        List<Path2D.Double> outlines = new ArrayList<>();
+        for (Face face : faces) {
+            outlines.add(outline(face));
+        }
+        return outlines;
+    }
+
+    private Path2D.Double outline(Face face) {
+        Path2D.Double path = new Path2D.Double();
+        for (int i = 0; i < face.points().length; i++) {
+            double[] q = face.points()[i];
+            double x = projection.x(q[0], q[1]);
+            double y = projection.y(q[0], q[1], q[2]);
+            if (i == 0) {
+                path.moveTo(x, y);
+            } else {
+                path.lineTo(x, y);
+            }
+        }
+        path.closePath();
+        return path;
     }
 
     private Color lit(Color colour, double[] n) {
