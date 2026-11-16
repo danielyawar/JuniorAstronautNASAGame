@@ -270,8 +270,10 @@ public final class Rules {
         double clean = clamp(o.panelsClean() - dustRate(weather) * dt
                 + (place == Place.PANELS ? BRUSH_PER_HOUR * there : 0), 0, 1);
         double shield = Math.min(1, o.shield() + (digging ? DIG_PER_HOUR * there * running : 0));
+        boolean soilAllowsGrowth = Soil.ph(o.marsSoil()) < Soil.FOOD_STOP_PH;
         double crops = Math.min(CROPS_MAX, o.cropsReady()
-                + (o.lampsOn() ? GROW_PER_HOUR * dt * running * Soil.growth(o.marsSoil()) : 0));
+                + (o.lampsOn() && soilAllowsGrowth
+                        ? GROW_PER_HOUR * dt * running * Soil.growth(o.marsSoil()) : 0));
         double grown = crops - o.cropsReady();
         double picked = place == Place.GREENHOUSE ? Math.min(crops, PICK_PER_HOUR * there) : 0;
         // The pH slowly climbs as Mars soil creeps in, and faster as growing food uses up Earth soil.

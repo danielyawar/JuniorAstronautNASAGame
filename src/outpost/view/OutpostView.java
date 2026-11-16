@@ -131,9 +131,13 @@ public final class OutpostView extends JPanel {
      * button), unless {@code whole} asks for everything the place has: picture, button and
      * switch together.
      */
-    private record Hint(String text, Spot target, boolean whole) {
+    private record Hint(String text, Spot target, boolean whole, boolean alert) {
         Hint(String text, Spot target) {
-            this(text, target, false);
+            this(text, target, false, false);
+        }
+
+        Hint(String text, Spot target, boolean whole) {
+            this(text, target, whole, false);
         }
     }
 
@@ -543,8 +547,10 @@ public final class OutpostView extends JPanel {
                 EARTH, EARTH_EDGE);
         roundButton(g, Site.PANELS, "SOLAR", Math.round(o.panelsClean() * 100) + "% clean", null,
                 dusty ? Glyphs.WARN : SUN_YELLOW, dusty ? WARN_EDGE : SUN_EDGE);
-        roundButton(g, Site.GREENHOUSE, "GROW", String.format(Locale.ENGLISH, "pH %.1f", Soil.ph(o.marsSoil())),
-                String.format(Locale.ENGLISH, "Food %.1fd", o.foodDays()), LEAF_GREEN, LEAF_EDGE);
+        double soilPh = Soil.ph(o.marsSoil());
+        roundButton(g, Site.GREENHOUSE, "GROW", String.format(Locale.ENGLISH, "pH %.1f", soilPh),
+                String.format(Locale.ENGLISH, "Food %.1fd", o.foodDays()), LEAF_GREEN, LEAF_EDGE,
+                soilPh >= Soil.FOOD_STOP_PH ? new Color(255, 90, 90) : Color.WHITE);
         toggle(g, Site.HABITAT, Spot.HEATER, "HEAT", o.heaterOn(), now.heaterWorking());
         toggle(g, Site.GREENHOUSE, Spot.LAMPS, "LAMPS", o.lampsOn(), now.lampsWorking());
 
@@ -575,6 +581,12 @@ public final class OutpostView extends JPanel {
     /** A round button: the place's name, its reading, and a second, smaller reading or null. */
     private void roundButton(Graphics2D g, Site site, String name, String reading, String note, Color accent,
                              Color edge) {
+        roundButton(g, site, name, reading, note, accent, edge, Color.WHITE);
+    }
+
+    /** Same round button, with a selectable colour for its main reading. */
+    private void roundButton(Graphics2D g, Site site, String name, String reading, String note, Color accent,
+                             Color edge, Color readingColor) {
         Ellipse2D area = site.button();
         boolean hot = place(hover.spot()) == site.place();
         g.setColor(BUTTON_FILL);
@@ -586,7 +598,7 @@ public final class OutpostView extends JPanel {
         g.setColor(accent);
         Draw.centred(g, name, area.getCenterX(), area.getCenterY() - 13);
         g.setFont(BUTTON_VALUE_FONT);
-        g.setColor(Color.WHITE);
+        g.setColor(readingColor);
         Draw.centred(g, reading, area.getCenterX(), area.getCenterY() + 1);
         if (note != null) {
             g.setFont(BUTTON_NOTE_FONT);
@@ -1095,6 +1107,9 @@ public final class OutpostView extends JPanel {
         if (state.phase() != Phase.DAY) {
             return new Hint("", Spot.NONE);
         }
+        if (Soil.ph(o.marsSoil()) >= Soil.FOOD_STOP_PH) {
+            return new Hint("Soil pH too high — food production has stopped", Spot.NONE, false, true);
+        }
         if (lesson != Step.NONE) {
             return lessonHint();
         }
@@ -1243,7 +1258,8 @@ public final class OutpostView extends JPanel {
         if (phase == Phase.DAY || phase == Phase.NIGHT) {
             // During the lesson the guide keeps to the lesson, whatever the mouse is over.
             String does = phase == Phase.DAY && !teaching ? clickDoes() : null;
-            paintGuide(g, does != null ? does : hint.text(), does != null);
+            String guideText = hint.alert() ? hint.text() : does != null ? does : hint.text();
+            paintGuide(g, guideText, !hint.alert() && does != null, hint.alert());
             quietButton(g, HOME_BUTTON, "Change mission", Spot.HOME);
             quietButton(g, RESTART_BUTTON, "Restart", Spot.RESTART);
         }
@@ -1332,13 +1348,19 @@ public final class OutpostView extends JPanel {
      * something, what a click on it will do, in white.
      */
     private void paintGuide(Graphics2D g, String text, boolean aboutTheMouse) {
+        paintGuide(g, text, aboutTheMouse, false);
+    }
+
+    /** The persistent soil warning takes priority over ordinary guide and hover messages. */
+    private void paintGuide(Graphics2D g, String text, boolean aboutTheMouse, boolean alert) {
         if (text.isEmpty()) {
             return;
         }
         g.setFont(GUIDE_FONT);
         double width = Math.ceil(g.getFontMetrics().stringWidth(text)) + 24;
-        Draw.box(g, 12, 542, width, 32, BUBBLE, aboutTheMouse ? Draw.EDGE : Glyphs.POWER);
-        g.setColor(aboutTheMouse ? Color.WHITE : Glyphs.POWER);
+        Color edge = alert ? Glyphs.BAD : aboutTheMouse ? Draw.EDGE : Glyphs.POWER;
+        Draw.box(g, 12, 542, width, 32, BUBBLE, edge);
+        g.setColor(alert ? Glyphs.BAD : aboutTheMouse ? Color.WHITE : Glyphs.POWER);
         g.drawString(text, 24, 563);
     }
 }

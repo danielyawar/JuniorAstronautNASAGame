@@ -44,6 +44,8 @@ public final class Soil {
     public static final double MARS_PH = 9.25;
     /** Game rule: at or below this pH the soil is healthy. */
     static final double HEALTHY_MAX_PH = 7.0;
+    /** Game rule: food production stops at or above this pH. */
+    public static final double FOOD_STOP_PH = 8.0;
     /** Game rule: above this pH the soil is stressed (the study saw stress at 8.55 and 9.25). */
     static final double STRESSED_ABOVE_PH = 8.5;
 
