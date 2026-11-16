@@ -23,7 +23,7 @@ enum Site {
 
     // Place, its picture's file, where the picture is drawn (left, top, width, height),
     // where the astronaut's feet are (x, y), the round button's corner, the switch's corner.
-    HABITAT(Place.HABITAT, "base.png", box(350, 375, 175, 150), 388, 502, null, toggle(319, 314)),
+    HABITAT(Place.HABITAT, "base.png", box(350, 375, 175, 150), 388, 502, null, toggle(326, 418)),
     GREENHOUSE(Place.GREENHOUSE, "greenh.png", box(625, 375, 105, 85), 677, 504, button(639, 302), toggle(594, 384)),
     PANELS(Place.PANELS, "panel.png", box(80, 470, 80, 50), 184, 508, button(82, 390), null),
     DIGGER(Place.DIGGER, "drill.png", box(327, 180, 60, 50), 424, 236, button(309, 100), null);

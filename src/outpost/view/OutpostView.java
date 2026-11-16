@@ -627,6 +627,8 @@ public final class OutpostView extends JPanel {
     // ---- Cards ----------------------------------------------------------------------
 
     private static final double CARD_WIDTH = 262;
+    /** Below this share of Mars soil the garden soil counts as fresh again. */
+    private static final double SOIL_DONE = 0.005;
     private static final double CARD_HEAD = 26;
     private static final double FACT_ROW = 16;
     private static final double NOTE_ROW = 14;
@@ -1128,7 +1130,12 @@ public final class OutpostView extends JPanel {
             return new Hint("The panels are clean. Pick another job.", Spot.NONE);
         }
         if (o.at(Place.GREENHOUSE) && !picking) {
-            return new Hint("Nothing left to pick. Pick another job.", Spot.NONE);
+            return o.marsSoil() > SOIL_DONE
+                    ? new Hint("Adding fresh soil to bring the pH back down.", Spot.NONE)
+                    : new Hint("Nothing left to pick and the soil is fresh. Pick another job.", Spot.NONE);
+        }
+        if (o.place() != Place.GREENHOUSE && Soil.zone(o.marsSoil()) != Soil.Zone.HEALTHY) {
+            return new Hint("The soil pH is high. Click the greenhouse to add fresh soil.", Spot.GREENHOUSE);
         }
         if (o.at(Place.DIGGER) && o.shield() >= 1) {
             return new Hint("The shield is finished! Pick another job.", Spot.NONE);
@@ -1154,7 +1161,7 @@ public final class OutpostView extends JPanel {
             case DIGGER:
                 return "Click: dig soil onto the shield. The digger uses energy.";
             case GREENHOUSE:
-                return "Click: pick the food that has grown.";
+                return "Click: pick the food, and add fresh soil to bring the pH down.";
             case HABITAT:
                 return "Click: rest inside. Health comes back slowly.";
             case HEATER:
@@ -1197,11 +1204,13 @@ public final class OutpostView extends JPanel {
         if (phase == Phase.DAY && state.now().outsideC() < 0 && !state.outpost().heaterOn()) {
             Rectangle2D heater = Site.HABITAT.toggle().getFrame();
             g.setFont(Draw.BODY_FONT);
-            String warning = "You're getting cold \u2014 turn on the habitat heater";
+            String warning = "You're getting cold \u2014 turn on the heater";
             int warningWidth = g.getFontMetrics().stringWidth(warning) + 20;
-            Draw.box(g, heater.getX() - 12, heater.getY() + 20, warningWidth, 20, COLD_FILL, Glyphs.BAD);
+            double warningLeft = Math.max(6, Math.min(heater.getX() - 12, Draw.WIDTH - 6 - warningWidth));
+            double warningTop = heater.getY() - 48;
+            Draw.box(g, warningLeft, warningTop, warningWidth, 20, COLD_FILL, Glyphs.BAD);
             g.setColor(Color.WHITE);
-            g.drawString(warning, (float) heater.getX() - 2, (float) heater.getY() + 34);
+            g.drawString(warning, (float) warningLeft + 10, (float) warningTop + 14);
         }
 
         // A solar storm is news, so it gets a line of its own under the strip. A card from
