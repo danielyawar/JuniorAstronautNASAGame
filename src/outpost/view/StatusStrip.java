@@ -25,7 +25,7 @@ final class StatusStrip {
 
     static final Rectangle2D AREA = new Rectangle2D.Double(12, 10, 776, 48);
     /** The battery's part of the strip. The view explains the moon mark when the mouse is over it. */
-    static final Rectangle2D ENERGY = new Rectangle2D.Double(538, 10, 250, 48);
+    static final Rectangle2D ENERGY = new Rectangle2D.Double(598, 10, 190, 48);
     private static final Color EMPTY_BAR = new Color(62, 66, 88);
     private static final Color BUBBLE = new Color(24, 28, 44, 222);
     private static final Color SUN = new Color(255, 205, 80);
@@ -52,7 +52,7 @@ final class StatusStrip {
         g.drawString("Earth date " + DATE.format(state.sol().earthDate()), (float) left + 11, (float) top + 39);
         paintSunTrack(g, left + 124, top + 26, state);
 
-        meter(g, left + 176, 192, Glyphs::heart, Glyphs.HEALTH, "Health",
+        meter(g, left + 176, 190, Glyphs::heart, Glyphs.HEALTH, "Health",
                 String.valueOf(Draw.health(o.health())), o.health() / 100);
         // Why health is falling, as the energy bar says "filling" or "draining".
         if (clockRuns(state)) {
@@ -67,6 +67,7 @@ final class StatusStrip {
                     break;
             }
         }
+        paintRadiation(g, state);
         paintEnergy(g, state);
     }
 
@@ -159,6 +160,34 @@ final class StatusStrip {
         g.setFont(Draw.TITLE_FONT);
         Draw.rightAligned(g, value, left + width - 12, AREA.getY() + 17);
         bar(g, left + 12, width - 24, colour, share);
+    }
+
+    /**
+     * Surface radiation and the amount blocked by the habitat's soil shielding,
+     * both expressed per Martian sol.
+     */
+    private static void paintRadiation(Graphics2D g, GameState state) {
+        double left = 386;
+        double width = 200;
+        double top = AREA.getY();
+        double dosePerSol = state.radiation().doseMsv() * (24.6597 / 24.0);
+        double blockingPerSol = dosePerSol * state.now().shieldBlocks();
+
+        // Divider and warning symbol.
+        g.setColor(new Color(255, 255, 255, 40));
+        g.fill(new Rectangle2D.Double(left, top + 7, 1, AREA.getHeight() - 14));
+        Glyphs.radiation(g, left + 12, top + 7, 12, Glyphs.WARN);
+
+        g.setFont(Draw.BODY_FONT);
+        g.setColor(Color.WHITE);
+        g.drawString("Radiation", (float) left + 30, (float) top + 17);
+        g.drawString("Blocking", (float) left + 30, (float) top + 39);
+
+        g.setFont(Draw.TITLE_FONT);
+        Draw.rightAligned(g, String.format(Locale.ENGLISH, "%.2f mSv/sol", dosePerSol),
+                left + width - 12, top + 17);
+        Draw.rightAligned(g, String.format(Locale.ENGLISH, "%.2f mSv/sol", blockingPerSol),
+                left + width - 12, top + 39);
     }
 
     /**
