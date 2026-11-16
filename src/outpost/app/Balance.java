@@ -235,7 +235,7 @@ final class Balance {
      * What a careful child might do. The heater stays on. The lamps are on while the Sun
      * is making more than everything uses, or the battery is nearly full, and go off for
      * the night unless the battery can carry them. The astronaut brushes dusty panels,
-     * picks food when there is a day's worth, digs while the battery is healthy, and
+     * picks food when there is a day's worth, adds fresh soil when the pH climbs, digs while the battery is healthy, and
      * otherwise rests inside. On a solar storm sol they stay in except for short jobs.
      */
     private static void sensible(GameState state, PlayerActions actions) {
@@ -253,10 +253,14 @@ final class Balance {
             go = Place.PANELS; // finish the job
         } else if (o.place() == Place.GREENHOUSE && o.cropsReady() > 0.02) {
             go = Place.GREENHOUSE;
+        } else if (o.place() == Place.GREENHOUSE && o.marsSoil() > 0.02 && !storm) {
+            go = Place.GREENHOUSE; // keep adding fresh soil until the pH is back where it started
         } else if (o.panelsClean() < (storm ? 0.6 : 0.85)) {
             go = Place.PANELS;
         } else if (o.cropsReady() >= 1 || (evening && o.cropsReady() > 0.05 && o.foodDays() < 1)) {
             go = Place.GREENHOUSE;
+        } else if (!storm && !evening && o.marsSoil() > 0.3) {
+            go = Place.GREENHOUSE; // the pH is getting high: add fresh soil
         } else if (!storm && !evening && o.shield() < 1
                 && o.energy() >= (o.place() == Place.DIGGER ? 35 : 55)
                 && o.energy() >= Rules.nightNeed(Rules.switched(o, true, false), weather) * now.dayShare()) {

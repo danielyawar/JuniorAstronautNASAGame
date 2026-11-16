@@ -102,6 +102,10 @@ public final class Rules {
     static final double SOIL_PER_FOOD_DAY = 0.10;
     /** Share of the garden soil that returns to Earth-like soil for each day of food picked (plant clippings as compost). */
     static final double COMPOST_PER_FOOD_DAY = 0.03;
+    /** Share of the garden soil that Mars soil creeps into in a Mars hour, even with nothing growing: the pH slowly climbs. */
+    static final double SOIL_DRIFT_PER_HOUR = 0.010;
+    /** Share of the garden soil the astronaut swaps back to fresh Earth soil in a Mars hour spent in the greenhouse. */
+    static final double SOIL_ADDED_PER_HOUR = 0.12;
     /** Share of the garden soil that is Mars soil when the mission starts: all Earth soil. */
     public static final double START_MARS_SOIL = 0;
 
@@ -270,8 +274,12 @@ public final class Rules {
                 + (o.lampsOn() ? GROW_PER_HOUR * dt * running * Soil.growth(o.marsSoil()) : 0));
         double grown = crops - o.cropsReady();
         double picked = place == Place.GREENHOUSE ? Math.min(crops, PICK_PER_HOUR * there) : 0;
-        // Growing food uses up Earth soil, and Mars soil takes its place. Picking returns clippings as compost.
-        double marsSoil = Soil.clamp(o.marsSoil() + SOIL_PER_FOOD_DAY * grown - COMPOST_PER_FOOD_DAY * picked);
+        // The pH slowly climbs as Mars soil creeps in, and faster as growing food uses up Earth soil.
+        // Picking returns clippings as compost. Time spent in the greenhouse adds fresh Earth soil,
+        // which neutralises the soil and can bring the pH all the way back to where it started.
+        double addedSoil = place == Place.GREENHOUSE ? SOIL_ADDED_PER_HOUR * there : 0;
+        double marsSoil = Soil.clamp(o.marsSoil() + SOIL_PER_FOOD_DAY * grown + SOIL_DRIFT_PER_HOUR * dt
+                - COMPOST_PER_FOOD_DAY * picked - addedSoil);
 
         // Health. Only the habitat has the soil bank round it, so only there is any radiation stopped.
         double sheltered = place == Place.HABITAT ? there : 0;
