@@ -5,6 +5,7 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.Stroke;
 import java.awt.geom.AffineTransform;
+import java.awt.geom.Ellipse2D;
 import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
 
@@ -17,7 +18,6 @@ public final class Glyphs {
 
     public static final Color SHIELD = new Color(150, 150, 255);
     public static final Color GREENHOUSE = new Color(112, 214, 112);
-    public static final Color HEAT = new Color(255, 160, 84);
     public static final Color POWER = new Color(255, 212, 84);
     public static final Color HEALTH = new Color(255, 104, 124);
     public static final Color GOOD = new Color(122, 224, 132);
@@ -38,6 +38,41 @@ public final class Glyphs {
         path.curveTo(0.9, -0.1, 1.25, 0.5, 0.5, 0.96);
         path.closePath();
         fill(g, x, y, size, colour, path);
+    }
+
+    /** Radiation trefoil: ionizing radiation. */
+    public static void radiation(Graphics2D g, double x, double y, double size, Color colour) {
+        // Three rounded wedge-like blades around a small central hub.
+        for (int i = 0; i < 3; i++) {
+            double angle = -Math.PI / 2 + i * (2 * Math.PI / 3);
+            double spread = 0.38;
+            double inner = 0.19;
+            double outer = 0.46;
+
+            Path2D.Double blade = new Path2D.Double();
+            blade.moveTo(0.5 + inner * Math.cos(angle - spread),
+                    0.5 + inner * Math.sin(angle - spread));
+            blade.lineTo(0.5 + outer * Math.cos(angle - spread),
+                    0.5 + outer * Math.sin(angle - spread));
+            blade.quadTo(0.5 + outer * 1.04 * Math.cos(angle),
+                    0.5 + outer * 1.04 * Math.sin(angle),
+                    0.5 + outer * Math.cos(angle + spread),
+                    0.5 + outer * Math.sin(angle + spread));
+            blade.lineTo(0.5 + inner * Math.cos(angle + spread),
+                    0.5 + inner * Math.sin(angle + spread));
+            blade.closePath();
+            fill(g, x, y, size, colour, blade);
+        }
+
+        g.setColor(colour);
+        g.fill(new Ellipse2D.Double(x + size * 0.405, y + size * 0.405,
+                size * 0.19, size * 0.19));
+
+        Stroke old = g.getStroke();
+        g.setStroke(new BasicStroke((float) (size * 0.055)));
+        g.draw(new Ellipse2D.Double(x + size * 0.025, y + size * 0.025,
+                size * 0.95, size * 0.95));
+        g.setStroke(old);
     }
 
     /** Shield: radiation shielding. */
@@ -65,20 +100,6 @@ public final class Glyphs {
         g.setStroke(new BasicStroke((float) (size * 0.09), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
         g.draw(new Line2D.Double(x + size * 0.04, y + size * 0.98, x + size * 0.3, y + size * 0.7));
         g.setStroke(old);
-    }
-
-    /** Flame: heating. */
-    public static void flame(Graphics2D g, double x, double y, double size, Color colour) {
-        Path2D.Double path = new Path2D.Double();
-        path.moveTo(0.5, 0.0);
-        path.curveTo(0.62, 0.3, 0.98, 0.48, 0.84, 0.78);
-        path.quadTo(0.72, 1.0, 0.5, 1.0);
-        path.quadTo(0.26, 1.0, 0.16, 0.78);
-        path.curveTo(0.04, 0.54, 0.26, 0.42, 0.3, 0.26);
-        path.quadTo(0.4, 0.38, 0.42, 0.46);
-        path.quadTo(0.52, 0.3, 0.5, 0.0);
-        path.closePath();
-        fill(g, x, y, size, colour, path);
     }
 
     /** Five-pointed star: mission rating. */

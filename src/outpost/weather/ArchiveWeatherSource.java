@@ -33,6 +33,7 @@ public final class ArchiveWeatherSource implements WeatherSource {
         for (String[] row : CsvResource.read(ArchiveWeatherSource.class, "curiosity_weather.csv").rows()) {
             rows.put(LocalDate.parse(row[0]), row);
         }
+        Double ls = null;
         Double min = null;
         Double max = null;
         Double pressure = null;
@@ -42,6 +43,7 @@ public final class ArchiveWeatherSource implements WeatherSource {
         // The first pass finds starting values for the few sols before the rover's first
         // full reading. The second fills every row, carrying the last known value forward.
         for (String[] row : rows.values()) {
+            ls = ls != null ? ls : number(row[2]);
             min = min != null ? min : number(row[3]);
             max = max != null ? max : number(row[4]);
             pressure = pressure != null ? pressure : number(row[7]);
@@ -49,11 +51,12 @@ public final class ArchiveWeatherSource implements WeatherSource {
             sunrise = sunrise != null ? sunrise : time(row[9]);
             sunset = sunset != null ? sunset : time(row[10]);
         }
-        if (min == null || max == null || pressure == null || uv == null) {
+        if (ls == null || min == null || max == null || pressure == null || uv == null) {
             throw new IllegalStateException("curiosity_weather.csv has no complete readings");
         }
         for (Map.Entry<LocalDate, String[]> entry : rows.entrySet()) {
             String[] row = entry.getValue();
+            ls = number(row[2]) != null ? number(row[2]) : ls;
             min = number(row[3]) != null ? number(row[3]) : min;
             max = number(row[4]) != null ? number(row[4]) : max;
             pressure = number(row[7]) != null ? number(row[7]) : pressure;
@@ -62,7 +65,7 @@ public final class ArchiveWeatherSource implements WeatherSource {
             sunset = time(row[10]) != null ? time(row[10]) : sunset;
             byDate.put(entry.getKey(), new WeatherConditions(
                     min, max, sunlightFor(uv), Integer.parseInt(row[1]), pressure, uv,
-                    sunrise, sunset, entry.getKey()));
+                    sunrise, sunset, entry.getKey(), ls));
         }
     }
 
