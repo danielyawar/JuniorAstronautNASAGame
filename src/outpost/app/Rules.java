@@ -341,6 +341,21 @@ public final class Rules {
 
     // ---- Readings -------------------------------------------------------------------
 
+    /** The separate power demands, each measured per Mars hour. */
+    public record EnergyUse(double lifeSupport, double heater, double lamps, double digger) {
+        public double total() {
+            return lifeSupport + heater + lamps + digger;
+        }
+    }
+
+    /** The active systems' energy demands at this moment, split out for the interface. */
+    public static EnergyUse energyUse(Outpost o, WeatherConditions weather) {
+        double outside = outsideC(weather, o.clock());
+        boolean digging = o.at(Place.DIGGER) && o.shield() < 1;
+        return new EnergyUse(LIFE_SUPPORT, o.heaterOn() ? heaterDraw(outside) : 0,
+                o.lampsOn() ? LAMP_DRAW : 0, digging ? DIGGER_DRAW : 0);
+    }
+
     /** What the instruments read at the outpost's clock time. */
     public static Readings readings(Outpost o, WeatherConditions weather, RadiationConditions radiation) {
         double clock = o.clock();
@@ -349,8 +364,7 @@ public final class Rules {
         double outside = outsideC(weather, clock);
         boolean digging = o.at(Place.DIGGER) && o.shield() < 1;
         double in = solarRate(o.panelsClean(), weather, clock);
-        double out = LIFE_SUPPORT + (o.heaterOn() ? heaterDraw(outside) : 0)
-                + (o.lampsOn() ? LAMP_DRAW : 0) + (digging ? DIGGER_DRAW : 0);
+        double out = energyUse(o, weather).total();
         boolean power = o.energy() > 1e-9 || in >= out;
         return new Readings(sunHeight(weather, clock),
                 clamp((clock - sunrise) / (sunset - sunrise), 0, 1),
