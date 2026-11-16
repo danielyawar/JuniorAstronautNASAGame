@@ -29,11 +29,11 @@ final class StatusStrip {
 
     static final Rectangle2D AREA = new Rectangle2D.Double(12, 10, 776, 48);
     /** The battery's part of the strip. The view explains the moon mark when the mouse is over it. */
-    static final Rectangle2D ENERGY = new Rectangle2D.Double(538, 10, 250, 48);
+    static final Rectangle2D ENERGY = new Rectangle2D.Double(550, 10, 238, 48);
     /** The temperature outside now. As tall as the strip, so a finger can hit it; a click opens the weather card. */
     static final Rectangle2D WEATHER = new Rectangle2D.Double(380, 10, 74, 48);
-    /** Today's radiation, pink on a solar storm sol. A click opens the radiation card. */
-    static final Rectangle2D RADIATION = new Rectangle2D.Double(454, 10, 84, 48);
+    /** Today's radiation under its sign, pink on a solar storm sol. A click opens the radiation card. */
+    static final Rectangle2D RADIATION = new Rectangle2D.Double(454, 10, 96, 48);
     /** The pink of a solar storm. */
     static final Color ALERT = new Color(255, 96, 160);
     private static final Color EMPTY_BAR = new Color(62, 66, 88);
@@ -89,11 +89,11 @@ final class StatusStrip {
         // The two readings open their cards only while a sol is being played.
         boolean opens = state.phase() == Phase.DAY;
         boolean dusty = state.weather().sunlight() < 0.5;
-        reading(g, WEATHER, dusty ? "Dusty sky" : "Outside", dusty ? Glyphs.WARN : Color.WHITE,
+        reading(g, WEATHER, null, null, dusty ? "Dusty sky" : "Outside", dusty ? Glyphs.WARN : Color.WHITE,
                 degrees(state.now().outsideC()), Color.WHITE, opens);
         RadiationConditions radiation = state.radiation();
         Color tone = radiation.solarEvent() ? ALERT : Color.WHITE;
-        reading(g, RADIATION, "Radiation", tone,
+        reading(g, RADIATION, Glyphs::radiation, radiation.solarEvent() ? ALERT : Glyphs.WARN, "Radiation", tone,
                 String.format(Locale.ENGLISH, "%.2f mSv", radiation.doseMsv()), tone, opens);
         paintEnergy(g, state);
     }
@@ -114,20 +114,26 @@ final class StatusStrip {
     }
 
     /**
-     * One of the day's real readings: its name, and under it the reading itself. While
-     * {@code opens}, a small arrow after the name says that a click brings more.
+     * One of the day's real readings: its name, and under it the reading itself. With an
+     * {@code icon}, that sign is drawn before the name. While {@code opens}, a small arrow
+     * after the name says that a click brings more.
      */
-    private static void reading(Graphics2D g, Rectangle2D area, String name, Color nameColour, String value,
-                                Color valueColour, boolean opens) {
+    private static void reading(Graphics2D g, Rectangle2D area, Icon icon, Color iconColour, String name,
+                                Color nameColour, String value, Color valueColour, boolean opens) {
         float left = (float) area.getX() + 9;
         float top = (float) area.getY();
         g.setColor(DIVIDER);
         g.fillRect((int) area.getX(), (int) top + 7, 1, (int) area.getHeight() - 14);
+        float nameLeft = left;
+        if (icon != null) {
+            icon.draw(g, left, top + 7, 12, iconColour);
+            nameLeft += 16;
+        }
         g.setFont(Draw.BODY_FONT);
         g.setColor(nameColour);
-        g.drawString(name, left, top + 17);
+        g.drawString(name, nameLeft, top + 17);
         if (opens) {
-            double x = left + g.getFontMetrics().stringWidth(name) + 5;
+            double x = nameLeft + g.getFontMetrics().stringWidth(name) + 5;
             g.translate(x, top + 10.5);
             g.setColor(Draw.MUTED);
             g.fill(MORE);

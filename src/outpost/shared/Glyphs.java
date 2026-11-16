@@ -5,6 +5,7 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.Stroke;
 import java.awt.geom.AffineTransform;
+import java.awt.geom.Ellipse2D;
 import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
 
@@ -37,6 +38,41 @@ public final class Glyphs {
         path.curveTo(0.9, -0.1, 1.25, 0.5, 0.5, 0.96);
         path.closePath();
         fill(g, x, y, size, colour, path);
+    }
+
+    /** Radiation trefoil: ionizing radiation. */
+    public static void radiation(Graphics2D g, double x, double y, double size, Color colour) {
+        // Three rounded wedge-like blades around a small central hub.
+        for (int i = 0; i < 3; i++) {
+            double angle = -Math.PI / 2 + i * (2 * Math.PI / 3);
+            double spread = 0.38;
+            double inner = 0.19;
+            double outer = 0.46;
+
+            Path2D.Double blade = new Path2D.Double();
+            blade.moveTo(0.5 + inner * Math.cos(angle - spread),
+                    0.5 + inner * Math.sin(angle - spread));
+            blade.lineTo(0.5 + outer * Math.cos(angle - spread),
+                    0.5 + outer * Math.sin(angle - spread));
+            blade.quadTo(0.5 + outer * 1.04 * Math.cos(angle),
+                    0.5 + outer * 1.04 * Math.sin(angle),
+                    0.5 + outer * Math.cos(angle + spread),
+                    0.5 + outer * Math.sin(angle + spread));
+            blade.lineTo(0.5 + inner * Math.cos(angle + spread),
+                    0.5 + inner * Math.sin(angle + spread));
+            blade.closePath();
+            fill(g, x, y, size, colour, blade);
+        }
+
+        g.setColor(colour);
+        g.fill(new Ellipse2D.Double(x + size * 0.405, y + size * 0.405,
+                size * 0.19, size * 0.19));
+
+        Stroke old = g.getStroke();
+        g.setStroke(new BasicStroke((float) (size * 0.055)));
+        g.draw(new Ellipse2D.Double(x + size * 0.025, y + size * 0.025,
+                size * 0.95, size * 0.95));
+        g.setStroke(old);
     }
 
     /** Shield: radiation shielding. */
