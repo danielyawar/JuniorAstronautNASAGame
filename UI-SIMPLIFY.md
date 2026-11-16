@@ -58,3 +58,17 @@ has not seen it. Count how many things they ask about. If it is more than two, c
 `java -jar SpaceGuy.jar paint-times` shows if drawing got slower.
 
 Rule 4 in `HANDOFF.md` still applies: painting reads the stored state and changes nothing.
+
+## Smaller picture-first resource controls (November 2026)
+
+The large habitat-temperature circle has been replaced by the Digger control. The three
+small circular controls are positioned below the intended artwork areas:
+
+- Digger: button at `(309, 232)`, size `76 x 76`; show shield progress on the button.
+- Solar: button at `(132, 390)`, size `76 x 76`; show panel cleanliness on the button.
+- Greenhouse: button at `(584, 302)`, size `76 x 76`; show soil pH and stored food on the button.
+
+The artwork areas above these controls are intentionally left to the project owner. Heater
+and grow-lamp switches remain separate clickable controls. The top strip now shows Sol/date,
+Health and Energy; the food meter has been removed because food is shown on the greenhouse
+button. Greenhouse pH is calculated from the existing soil model (`Soil.ph(o.marsSoil())`).
