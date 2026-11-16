@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import javax.swing.JPanel;
+import outpost.app.Rules;
 import outpost.shared.GameState;
 import outpost.shared.Glyphs;
 import outpost.shared.Outpost;
@@ -469,6 +470,7 @@ public final class OutpostView extends JPanel {
                 paintDoing(g);
                 paintHud(g, hint);
                 paintCard(g);
+                paintEnergyTooltip(g);
                 if (phase == Phase.READY) {
                     Notices.paintStart(g, state, this, hover.spot() == Spot.START);
                 } else if (phase == Phase.DAWN) {
@@ -685,9 +687,10 @@ public final class OutpostView extends JPanel {
                 facts.add(new Fact("Radiation today", String.format(Locale.ENGLISH, "%.2f mSv", radiation.doseMsv())));
                 sentences.add(radiation.solarEvent() ? "A solar storm has raised it today."
                         : "No solar storm today.");
+                double blockedDoseMsv = radiation.doseMsv() * now.shieldBlocks();
                 sentences.add(String.format(Locale.ENGLISH,
-                        "The shield stops %.0f%% while your astronaut is in the habitat.",
-                        now.shieldBlocks() * 100));
+                        "The shield stops %.0f%% (%.2f mSv) while your astronaut is in the habitat.",
+                        now.shieldBlocks() * 100, blockedDoseMsv));
                 sentences.add("Outside and in the greenhouse nothing stops it.");
                 break;
             case ABOUT:
@@ -779,7 +782,8 @@ public final class OutpostView extends JPanel {
                 return Notices.nextSolButton(state).contains(x, y) ? new Hit(Spot.START)
                         : HOME_BUTTON.contains(x, y) ? new Hit(Spot.HOME) : NOTHING;
             case NIGHT:
-                return HOME_BUTTON.contains(x, y) ? new Hit(Spot.HOME)
+                return StatusStrip.ENERGY.contains(x, y) ? new Hit(Spot.ENERGY)
+                        : HOME_BUTTON.contains(x, y) ? new Hit(Spot.HOME)
                         : RESTART_BUTTON.contains(x, y) ? new Hit(Spot.RESTART) : NOTHING;
             default:
                 return new Hit(lesson == Step.NONE ? spotByDay(x, y) : spotInLesson(x, y));
@@ -1178,7 +1182,7 @@ public final class OutpostView extends JPanel {
             case SLEEP:
                 return "Click: go to bed now and skip to the night.";
             case ENERGY:
-                return "The moon mark shows how much energy tonight will take.";
+                return "Hover for energy gain, demand and net balance per second. The moon shows tonight's need.";
             default:
                 return null;
         }
@@ -1190,13 +1194,16 @@ public final class OutpostView extends JPanel {
         Phase phase = state.phase();
         StatusStrip.paint(g, state);
         // A reading in the strip lights up under the mouse, and stays lit while its card is open.
-        if (phase == Phase.DAY) {
+        if (phase == Phase.DAY || phase == Phase.NIGHT) {
             g.setColor(LIT);
-            if (hover.spot() == Spot.WEATHER || selected == Spot.WEATHER) {
+            if (phase == Phase.DAY && (hover.spot() == Spot.WEATHER || selected == Spot.WEATHER)) {
                 g.fill(StatusStrip.WEATHER);
             }
-            if (hover.spot() == Spot.RADIATION || selected == Spot.RADIATION) {
+            if (phase == Phase.DAY && (hover.spot() == Spot.RADIATION || selected == Spot.RADIATION)) {
                 g.fill(StatusStrip.RADIATION);
+            }
+            if (hover.spot() == Spot.ENERGY) {
+                g.fill(StatusStrip.ENERGY);
             }
         }
 
@@ -1251,6 +1258,72 @@ public final class OutpostView extends JPanel {
                 quietButton(g, ABOUT_BUTTON, "About the data", Spot.ABOUT);
                 quietButton(g, HOW_BUTTON, "How to play", Spot.HOW);
             }
+        }
+    }
+
+    /**
+     * The battery's live power balance, shown when its meter is hovered. Readings are per
+     * Mars hour, so convert them using the clock speed for the current phase.
+     */
+    private void paintEnergyTooltip(Graphics2D g) {
+        Phase phase = state.phase();
+        if (hover.spot() != Spot.ENERGY || (phase != Phase.DAY && phase != Phase.NIGHT)) {
+            return;
+        }
+
+        double marsHoursPerSecond = phase == Phase.NIGHT
+                ? Rules.NIGHT_HOURS_PER_SECOND
+                : (Rules.sunsetHour(state.weather()) - Rules.sunriseHour(state.weather())) / Rules.DAY_SECONDS;
+        Readings now = state.now();
+        double gain = now.energyIn() * marsHoursPerSecond;
+        Rules.EnergyUse use = Rules.energyUse(state.outpost(), state.weather());
+        double lifeSupport = use.lifeSupport() * marsHoursPerSecond;
+        double heater = use.heater() * marsHoursPerSecond;
+        double lamps = use.lamps() * marsHoursPerSecond;
+        double digger = use.digger() * marsHoursPerSecond;
+        double demand = use.total() * marsHoursPerSecond;
+        double balance = gain - demand;
+
+        String[] labels = {"Solar gain", "Life support", "Heater", "Grow lamps",
+                "Digger", "Total demand", "Net balance"};
+        double[] values = {gain, lifeSupport, heater, lamps, digger, demand, balance};
+        int visibleRows = 0;
+        for (int i = 0; i < labels.length; i++) {
+            // Hide zero-valued flows, but retain the net balance as the summary line.
+            if (i == labels.length - 1 || Math.abs(values[i]) > 1e-9) visibleRows++;
+        }
+
+        double left = StatusStrip.ENERGY.getX();
+        double top = StatusStrip.AREA.getMaxY() + 6;
+        double width = StatusStrip.ENERGY.getWidth();
+        double rowSpacing = 12.5;
+        double height = 25 + visibleRows * rowSpacing;
+        Draw.box(g, left, top, width, height, BUBBLE, Glyphs.POWER);
+
+        g.setFont(Draw.TITLE_FONT);
+        g.setColor(Glyphs.POWER);
+        g.drawString("Energy flow (per second)", (float) left + 10, (float) top + 16);
+
+        String unit = " energy/s";
+        g.setFont(Draw.BODY_FONT);
+        int row = 0;
+        for (int i = 0; i < labels.length; i++) {
+            if (i != labels.length - 1 && Math.abs(values[i]) <= 1e-9) continue;
+
+            double baseline = top + 32 + row++ * rowSpacing;
+            g.setColor(Draw.MUTED);
+            g.drawString(labels[i], (float) left + 10, (float) baseline);
+            if (i == 0) {
+                g.setColor(Color.WHITE);
+            } else if (i == labels.length - 1) {
+                g.setColor(balance > 1e-9 ? Glyphs.GOOD : balance < -1e-9 ? Glyphs.WARN : Color.WHITE);
+            } else {
+                g.setColor(Color.WHITE);
+            }
+            String value = i == 0 ? String.format(Locale.ENGLISH, "+%.2f%s", values[i], unit)
+                    : i == labels.length - 1 ? String.format(Locale.ENGLISH, "%+.2f%s", values[i], unit)
+                    : String.format(Locale.ENGLISH, "-%.2f%s", values[i], unit);
+            Draw.rightAligned(g, value, left + width - 10, baseline);
         }
     }
 
