@@ -53,6 +53,7 @@ public final class Main {
         frame.pack();
         frame.setLocationRelativeTo(null);
         frame.setVisible(true);
+        view.requestFocusInWindow(); // so that the home screen's keys work before the first click
 
         // The clock. A Swing timer fires on the event thread, and drops ticks instead of
         // queueing them when painting is slow, so the game stays responsive. The controller

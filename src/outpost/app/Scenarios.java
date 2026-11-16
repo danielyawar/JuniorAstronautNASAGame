@@ -30,7 +30,7 @@ final class Scenarios {
      * {@code hard} and the stories are the only claims about history the game makes.
      * Reword them freely for young readers, but add no fact without a NASA source for it.
      *
-     * <p>The order is the order of the cards on the home screen: from the gentlest mission
+     * <p>The order is the order of the list on the home screen: from the gentlest mission
      * to the hardest, by the health the careful scripted player has left at the end (see
      * Balance, which prints the order it finds and says so if this list disagrees). The
      * first is the one the home screen marks "Start here".
@@ -85,7 +85,7 @@ final class Scenarios {
         return new Scenario("Surprise mission", start, lastDate(start, sols),
                 "A mystery day",
                 "These are real days from the Curiosity rover's records, picked by chance."
-                + " Watch the sky and the radiation detector to see what Mars does.",
+                + " Watch the sky and the radiation to see what Mars does.",
                 Helmets.of(start, sols, weather, radiation));
     }
 

@@ -1,25 +1,25 @@
 package outpost.view;
 
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Rectangle2D;
 import java.awt.geom.RoundRectangle2D;
-import java.awt.image.BufferedImage;
-import java.io.IOException;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import javax.imageio.ImageIO;
 import javax.swing.JPanel;
 import outpost.shared.GameState;
 import outpost.shared.Glyphs;
@@ -29,23 +29,29 @@ import outpost.shared.Place;
 import outpost.shared.PlayerActions;
 import outpost.shared.RadiationConditions;
 import outpost.shared.Readings;
-import outpost.shared.Scenario;
 import outpost.shared.Soil;
 import outpost.shared.UvIndex;
 import outpost.shared.WeatherConditions;
 
 /**
  * The game's one panel. Before a mission it shows the home screen (HomeScreen). In a mission
- * it shows the angled bird's-eye view of the outpost (Scene) with every control drawn on it:
- * the player clicks a place to send the astronaut there, flips the heater and lamp switches
- * on the tags of their buildings, and presses SLEEP. Each click is passed to PlayerActions.
- * Everything is drawn from the GameState snapshot; painting never changes the game.
+ * it shows the outpost from above: a photo of the ground with a picture of each of the four
+ * places on it (Pictures), the astronaut (Astronaut), the light of the hour (Light), and
+ * every control drawn over them. The player clicks a place, or the round button beside it,
+ * to send the astronaut there, flips the heater and lamp switches, and presses SLEEP. Each
+ * click is passed to PlayerActions. Everything is drawn from the GameState snapshot;
+ * painting never changes the game.
+ *
+ * <p>Where each place is, where its button and its switch are and where the astronaut
+ * stands there is all in one table, {@link Site}. Nothing here has a place's coordinates.
  *
  * <p>The screen is kept quiet by giving every fact one home. What the player is looking
- * after (the sol, health, food, energy) is in one strip along the top (StatusStrip). Each
- * building carries a one-line tag with the number that matters now. Everything else about
- * the weather and the radiation is on a card, which opens when its instrument is clicked
- * and stops the clock while it is open. The box at the bottom left names one thing to do.
+ * after (the sol, health, energy) is in one strip along the top (StatusStrip), with the
+ * day's two real readings between them: the temperature outside and the radiation. Each
+ * place's round button carries the number that matters there now. Everything else about
+ * the weather and the radiation is on a card, which opens under the strip when its reading
+ * is clicked and stops the clock while it is open. The box at the bottom left names one
+ * thing to do.
  *
  * <p>The first time a mission is started, that box gives a short lesson before the clock
  * runs: see {@link Step}.
@@ -63,73 +69,68 @@ public final class OutpostView extends JPanel {
     private static final Color SUN_YELLOW = new Color(255, 205, 80);
     private static final Color LEAF_GREEN = new Color(120, 214, 110);
     private static final Color SKY_BLUE = new Color(120, 190, 255);
-    private static final Color WARM = new Color(255, 170, 90);
-    private static final Color ALERT = new Color(255, 96, 160);
+    private static final Color ALERT = StatusStrip.ALERT;
     private static final Color EARTH = new Color(232, 170, 120);
+    /** The edge of each round button: its own colour, a little see-through. */
+    private static final Color EARTH_EDGE = Draw.alpha(EARTH, 220);
+    private static final Color SUN_EDGE = Draw.alpha(SUN_YELLOW, 220);
+    private static final Color WARN_EDGE = Draw.alpha(Glyphs.WARN, 220);
+    private static final Color LEAF_EDGE = Draw.alpha(LEAF_GREEN, 220);
     private static final Color SWITCH_OFF = new Color(92, 96, 116);
     private static final Color SWITCH_DEAD = new Color(132, 44, 52);
+    private static final Color SWITCH_FRAME = new Color(24, 28, 44, 235);
+    private static final Color BUTTON_FILL = new Color(24, 28, 44, 220);
+    private static final Color QUIET_FILL = new Color(24, 28, 44, 110);
+    /** Laid over a quiet button or a reading in the strip while the mouse is on it or its card is open. */
+    private static final Color LIT = new Color(255, 255, 255, 46);
+    private static final Color LABEL_EDGE = Draw.alpha(Color.WHITE, 120);
+    private static final Color LABEL_EDGE_BAD = Draw.alpha(Glyphs.BAD, 120);
+    private static final Color COLD_FILL = new Color(80, 24, 32, 225);
+    private static final Color STORM_FILL = new Color(110, 20, 70, 235);
+    private static final Color HELMET = new Color(246, 246, 250);
+    private static final Color VISOR = new Color(30, 38, 66);
     private static final DateTimeFormatter DATE =
             DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH);
 
     private static final Font GUIDE_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 13);
     private static final Font SWITCH_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 9);
-    private static final Font LANDMARK_FONT = new Font(Font.SANS_SERIF, Font.ITALIC, 11);
-    private static final Font COMPASS_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 11);
-    private BufferedImage baseImage;
-    private BufferedImage drillImage;
-    private BufferedImage greenImage;
-    private BufferedImage panelImage;
-    private static final Rectangle2D SLEEP_BUTTON = new Rectangle2D.Double(700, 550, 88, 28);
+    private static final Font BUTTON_NAME_FONT = SWITCH_FONT;
+    private static final Font BUTTON_VALUE_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 10);
+    private static final Font BUTTON_NOTE_FONT = new Font(Font.SANS_SERIF, Font.PLAIN, 8);
+    private static final BasicStroke BUTTON_EDGE = new BasicStroke(1.5f);
+    private static final BasicStroke BUTTON_EDGE_HOT = new BasicStroke(2.5f);
 
-    // The three main resource controls. Their positions are in the 800 x 600 drawing space.
-    // Small circular controls sit just below the reserved picture areas. Add artwork above
-    // these coordinates without needing to change the button hit areas.
-    private static final Ellipse2D DIGGER_BUTTON = new Ellipse2D.Double(309, 100, 76, 76);
-    private static final Ellipse2D PANELS_BUTTON = new Ellipse2D.Double(82, 390, 76, 76);
-    private static final Ellipse2D GREENHOUSE_BUTTON = new Ellipse2D.Double(639, 302, 76, 76);
-    private static final Rectangle2D HEATER_SWITCH = new Rectangle2D.Double(319, 314, 56, 16);
-    private static final Rectangle2D LAMPS_SWITCH = new Rectangle2D.Double(594, 384, 56, 16);
+    private static final Rectangle2D SLEEP_BUTTON = new Rectangle2D.Double(700, 550, 88, 28);
     private static final Rectangle2D HOME_BUTTON = new Rectangle2D.Double(546, 580, 84, 16);
     private static final Rectangle2D ABOUT_BUTTON = new Rectangle2D.Double(636, 580, 86, 16);
     private static final Rectangle2D RESTART_BUTTON = new Rectangle2D.Double(728, 580, 60, 16);
     /** "How to play", just above the guide. The lesson's own buttons take its place while the lesson runs. */
     private static final Rectangle2D HOW_BUTTON = new Rectangle2D.Double(12, 520, 76, 16);
+    /** Where the time each repaint takes is shown, for whoever is tuning the drawing: see showPaintTime(). */
+    private static final Rectangle2D PAINT_TIME = new Rectangle2D.Double(12, 64, 216, 18);
 
-    /** Things on screen that can be clicked or pointed at. */
+    /**
+     * Things on screen that can be clicked or pointed at. The home screen keeps its own
+     * (HomeScreen). WEATHER and RADIATION are the two readings in the strip; HEATER and
+     * LAMPS are the two switches.
+     */
     private enum Spot {
-        NONE, HABITAT, GREENHOUSE, PANELS, DIGGER, WEATHER, DETECTOR, HEATER, LAMPS, SLEEP, START,
-        RESTART, ABOUT, HOME, PLAY_AGAIN, CARD, ENERGY, SCENARIO, SURPRISE, HOW, NEXT, SKIP
+        NONE, HABITAT, GREENHOUSE, PANELS, DIGGER, WEATHER, RADIATION, HEATER, LAMPS, SLEEP, START,
+        RESTART, ABOUT, HOME, PLAY_AGAIN, CARD, ENERGY, HOW, NEXT, SKIP
     }
 
-    /** What is under the mouse. {@code scenario} is set for a SCENARIO card on the home screen. */
-    private record Hit(Spot spot, Scenario scenario) {
-        Hit(Spot spot) {
-            this(spot, null);
-        }
-    }
+    /** What is under the mouse. */
+    private record Hit(Spot spot) {}
 
     private static final Hit NOTHING = new Hit(Spot.NONE);
 
-    /** A short reading: an icon, or none if {@code icon} is null, and then text. */
-    private record Stat(StatusStrip.Icon icon, Color iconColour, String text, Color textColour) {}
-
-    /** A switch on a tag: its name, whether it is on, and whether what it switches has energy to run. */
-    private record Switch(Spot spot, String name, boolean on, boolean working) {}
-
     /**
-     * The one-line tag over a building: its name, a number or two, and for the habitat and
-     * the greenhouse a switch. {@code switchArea} is where a click flips the switch and
-     * {@code pill} is the switch itself; both are null on a tag without one.
+     * What the guide tells the player, and the thing on screen it is about. For a place the
+     * ring goes round its round button (round its picture, for the habitat, which has no
+     * button), unless {@code whole} asks for everything the place has: picture, button and
+     * switch together.
      */
-    private record Chip(Spot spot, Rectangle2D box, double anchorX, boolean below, Color accent, String title,
-                        List<Stat> stats, Switch toggle, Rectangle2D switchArea, Rectangle2D pill) {}
-
-    /**
-     * What the guide tells the player, and the thing on screen it is about. On a tag with a
-     * switch the ring goes round the building's name alone, unless {@code wholeTag} asks for
-     * the name and the switch together.
-     */
-    private record Hint(String text, Spot target, boolean wholeTag) {
+    private record Hint(String text, Spot target, boolean whole) {
         Hint(String text, Spot target) {
             this(text, target, false);
         }
@@ -139,18 +140,22 @@ public final class OutpostView extends JPanel {
     private record Fact(String name, String value) {}
 
     /**
-     * The box that opens when an instrument is clicked. A card holds readings ({@code facts})
-     * and sentences ({@code notes}, already split into lines). {@code pointed} cards hang
-     * over {@code anchorX}; the others stand alone.
+     * The box that opens when a reading in the strip, or "About the data", is clicked. A
+     * card holds readings ({@code facts}) and sentences ({@code notes}, already split into
+     * lines). A {@code pointed} card hangs under the strip and points up at its reading, at
+     * {@code anchorX}; the others stand alone.
      */
     private record Card(Rectangle2D box, double anchorX, boolean pointed, String title, Color accent,
                         List<Fact> facts, List<String> notes) {}
 
-    private final transient Scene scene = new Scene();
-    private transient BufferedImage backgroundImage;
+    /** The ground and the buildings. Reading the picture files takes a moment, so it is done here, once. */
+    private final transient Pictures pictures = new Pictures();
+    private final transient Light light = new Light();
     private final transient PlayerActions actions;
+    /** The home screen. While it is showing, every mouse and key event is passed to it. */
+    private final transient HomeScreen home;
     private transient GameState state;
-    /** Whose card is open: WEATHER, DETECTOR, ABOUT or NONE. The clock stands still while one is. */
+    /** Whose card is open: WEATHER, RADIATION, ABOUT or NONE. The clock stands still while one is. */
     private Spot selected = Spot.NONE;
     /** The step of the lesson that is showing, or NONE. The clock stands still while one is. */
     private Step lesson = Step.NONE;
@@ -158,12 +163,16 @@ public final class OutpostView extends JPanel {
     private boolean taught;
     private transient Hit hover = NOTHING;
 
-    // Where the astronaut is drawn. Follows the state: see follow().
-    private double figureU;
-    private double figureV;
+    // Where the astronaut's feet are drawn, in the layout. Follows the state: see follow().
+    private double figureX;
+    private double figureY;
     private Place figureGoal;
     private double figureWalkLeft;
     private boolean figureKnown;
+
+    /** The guide's ring, kept so that painting it makes nothing new. */
+    private final transient Rectangle2D.Double ringBox = new Rectangle2D.Double();
+    private final transient Ellipse2D.Double ringRound = new Ellipse2D.Double();
 
     // For whoever is tuning the drawing: see showPaintTime().
     private boolean paintTimeShown;
@@ -176,45 +185,69 @@ public final class OutpostView extends JPanel {
         this.actions = actions;
         setOpaque(false);
         setPreferredSize(new Dimension(Draw.WIDTH, Draw.HEIGHT));
-        try {
-            backgroundImage = ImageIO.read(
-                OutpostView.class.getResource("/outpost/view/background.png")
-            );
-            baseImage = ImageIO.read(
-                OutpostView.class.getResource("/outpost/view/base.png")
-            );
-            drillImage = ImageIO.read(
-                OutpostView.class.getResource("/outpost/view/drill.png")
-            );
-            greenImage = ImageIO.read(
-                OutpostView.class.getResource("/outpost/view/greenh.png")
-            );
-            panelImage = ImageIO.read(
-                OutpostView.class.getResource("/outpost/view/panel.png")
-            );
-
-    } catch (IOException e) {
-        throw new IllegalStateException("Could not load background image", e);
-    }
+        home = new HomeScreen(this, actions);
+        setFocusable(true); // for the home screen's up and down keys
         MouseAdapter mouse = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
-                click(hitAt(e));
-                point(hitAt(e)); // the click may have changed what is under the mouse
+                requestFocusInWindow();
+                double[] at = layoutPoint(e);
+                if (onHome()) {
+                    home.pressed(at[0], at[1]);
+                } else {
+                    click(hitAt(at[0], at[1]));
+                }
+                pointAt(at); // the click may have changed what is under the mouse, or the whole screen
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                if (onHome()) {
+                    double[] at = layoutPoint(e);
+                    home.released(at[0], at[1]);
+                    pointAt(at);
+                }
+            }
+
+            @Override
+            public void mouseDragged(MouseEvent e) {
+                if (onHome()) {
+                    double[] at = layoutPoint(e);
+                    home.dragged(at[0], at[1]);
+                }
             }
 
             @Override
             public void mouseMoved(MouseEvent e) {
-                point(hitAt(e));
+                pointAt(layoutPoint(e));
             }
 
             @Override
             public void mouseExited(MouseEvent e) {
+                if (onHome()) {
+                    home.exited();
+                }
                 point(NOTHING);
+            }
+
+            @Override
+            public void mouseWheelMoved(MouseWheelEvent e) {
+                if (onHome()) {
+                    home.wheel(e.getPreciseWheelRotation());
+                }
             }
         };
         addMouseListener(mouse);
         addMouseMotionListener(mouse);
+        addMouseWheelListener(mouse);
+        addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                if (onHome()) {
+                    home.key(e.getKeyCode());
+                }
+            }
+        });
     }
 
     /** Called by the controller wiring whenever the state changes. */
@@ -224,8 +257,50 @@ public final class OutpostView extends JPanel {
             selected = Spot.NONE; // cards and the lesson belong to the day; home and restart close them
             lesson = Step.NONE;
         }
+        home.show(newState);
         follow(newState);
         repaint();
+    }
+
+    /** True while the home screen is showing: it then gets the mouse and the keys. */
+    private boolean onHome() {
+        return state != null && state.phase() == Phase.BRIEFING;
+    }
+
+    /** Where a mouse event is, in the 800 x 600 layout that every screen is drawn in. */
+    private double[] layoutPoint(MouseEvent e) {
+        double scale = Draw.scale(getWidth(), getHeight());
+        return new double[] {
+            (e.getX() - (getWidth() - Draw.WIDTH * scale) / 2) / scale,
+            (e.getY() - (getHeight() - Draw.HEIGHT * scale) / 2) / scale};
+    }
+
+    /** Tells whichever screen is showing where the mouse now is, and sets the cursor to match. */
+    private void pointAt(double[] at) {
+        if (onHome()) {
+            home.moved(at[0], at[1]);
+            point(NOTHING);
+            setCursor(Cursor.getPredefinedCursor(
+                    home.clickable(at[0], at[1]) ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
+        } else {
+            point(hitAt(at[0], at[1]));
+        }
+    }
+
+    /**
+     * While times are shown in the corner, every repaint takes the corner with it, so that
+     * the figure there keeps up when only part of the panel is repainted (the home screen
+     * repaints only its helmet as it turns).
+     */
+    @Override
+    public void repaint(long tm, int x, int y, int width, int height) {
+        super.repaint(tm, x, y, width, height);
+        if (paintTimeShown) {
+            double scale = Draw.scale(getWidth(), getHeight());
+            super.repaint(tm, (int) ((getWidth() - Draw.WIDTH * scale) / 2 + PAINT_TIME.getX() * scale) - 1,
+                    (int) ((getHeight() - Draw.HEIGHT * scale) / 2 + PAINT_TIME.getY() * scale) - 1,
+                    (int) (PAINT_TIME.getWidth() * scale) + 3, (int) (PAINT_TIME.getHeight() * scale) + 3);
+        }
     }
 
     /**
@@ -237,10 +312,13 @@ public final class OutpostView extends JPanel {
         repaint();
     }
 
+    // ---- The astronaut --------------------------------------------------------------
+
     /**
      * Moves the drawn astronaut to match a new state. The rules say only where the astronaut
      * is going and how many hours of walking are left, so the view walks the figure in a
-     * straight line from wherever it is, to arrive as the walking runs out.
+     * straight line from wherever it is to the place's standing spot (Site), to arrive as
+     * the walking runs out.
      */
     private void follow(GameState s) {
         Outpost o = s.outpost();
@@ -248,27 +326,107 @@ public final class OutpostView extends JPanel {
             figureKnown = false;
             return;
         }
-        double[] goal = scene.spot(o.place());
+        Site goal = Site.of(o.place());
         boolean sameWalk = figureKnown && o.place() == figureGoal && figureWalkLeft > 0
                 && o.walkLeft() <= figureWalkLeft;
         if (!figureKnown || !o.walking() || s.phase() == Phase.READY || s.phase() == Phase.DAWN) {
-            figureU = goal[0];
-            figureV = goal[1];
+            figureX = goal.standX();
+            figureY = goal.standY();
         } else if (sameWalk) {
             double left = o.walkLeft() / figureWalkLeft;
-            figureU = goal[0] + (figureU - goal[0]) * left;
-            figureV = goal[1] + (figureV - goal[1]) * left;
+            figureX = goal.standX() + (figureX - goal.standX()) * left;
+            figureY = goal.standY() + (figureY - goal.standY()) * left;
         } // otherwise a new walk has begun: it starts from where the figure stands
         figureGoal = o.place();
         figureWalkLeft = o.walkLeft();
         figureKnown = true;
     }
 
-    /** True while the astronaut is out of doors or in the greenhouse, where the figure is drawn. */
-    private boolean figureShown() {
-        Outpost o = state.outpost();
-        return state.phase() != Phase.NIGHT && !o.at(Place.HABITAT);
+    /**
+     * True at night, when the astronaut is in bed. The figure is not drawn then, and its
+     * label stays at the habitat's door with a small helmet in it. By day the astronaut is
+     * always drawn, so that the player can see them: resting, they stand at the door.
+     */
+    private boolean asleep() {
+        return state.phase() == Phase.NIGHT;
     }
+
+    private void paintAstronaut(Graphics2D g) {
+        if (asleep()) {
+            return;
+        }
+        Outpost o = state.outpost();
+        if (!o.walking()) {
+            Astronaut.paint(g, figureX, figureY, 0, 0);
+            return;
+        }
+        // Eight steps to a walk. The step comes from the state, so it stands still with the clock.
+        double step = Math.sin(o.walkLeft() * 50);
+        double ahead = Site.of(o.place()).standX() - figureX;
+        Astronaut.paint(g, figureX, figureY, step, ahead > 1 ? 1 : ahead < -1 ? -1 : 0);
+    }
+
+    /**
+     * A small label saying what the astronaut is doing: over their head by day, and in the
+     * same place at the habitat's door, with a small helmet in it, while they sleep.
+     */
+    private void paintDoing(Graphics2D g) {
+        Outpost o = state.outpost();
+        Readings now = state.now();
+        Phase phase = state.phase();
+        if (phase != Phase.DAY && phase != Phase.NIGHT) {
+            return;
+        }
+        String doing;
+        Color colour = Color.WHITE;
+        if (phase == Phase.NIGHT) {
+            doing = "Sleeping";
+        } else if (o.walking()) {
+            doing = "Walking";
+        } else {
+            switch (o.place()) {
+                case HABITAT:
+                    doing = "Resting";
+                    break;
+                case PANELS:
+                    doing = o.panelsClean() >= 0.995 ? "All clean!" : "Brushing";
+                    break;
+                case DIGGER:
+                    if (o.shield() >= 1) {
+                        doing = "Shield finished";
+                    } else if (now.diggerWorking()) {
+                        doing = "Digging";
+                    } else {
+                        doing = "Digger has no energy";
+                        colour = Glyphs.BAD;
+                    }
+                    break;
+                default:
+                    doing = o.cropsReady() > 0.02 ? "Picking food" : "Nothing to pick yet";
+                    break;
+            }
+        }
+        boolean asleep = asleep();
+        double x = asleep ? Site.HABITAT.standX() : figureX;
+        double head = (asleep ? Site.HABITAT.standY() : figureY) - Astronaut.HEIGHT;
+        g.setFont(Draw.SMALL_FONT);
+        double helmet = asleep ? 14 : 0;
+        double width = g.getFontMetrics().stringWidth(doing) + 12 + helmet;
+        double left = Math.round(x - width / 2);
+        double top = Math.round(head - 5 - 16);
+        Draw.box(g, left, top, width, 16, BUBBLE, colour == Color.WHITE ? LABEL_EDGE : LABEL_EDGE_BAD);
+        if (asleep) {
+            // The astronaut is out of sight: their helmet in the label says whose label it is.
+            g.setColor(HELMET);
+            g.fillOval((int) left + 4, (int) top + 3, 10, 10);
+            g.setColor(VISOR);
+            g.fillRoundRect((int) left + 6, (int) top + 6, 6, 4, 3, 3);
+        }
+        g.setColor(colour);
+        g.drawString(doing, (float) (left + 6 + helmet), (float) top + 12);
+    }
+
+    // ---- Painting -------------------------------------------------------------------
 
     @Override
     protected void paintComponent(Graphics g0) {
@@ -282,41 +440,31 @@ public final class OutpostView extends JPanel {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             // Letters keep their true widths at any size of window, so text laid out at
-            // 800 x 600 still fits its tag when the whole screen is drawn smaller or larger.
+            // 800 x 600 still fits its box when the whole screen is drawn smaller or larger.
             g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
             Phase phase = state.phase();
             if (phase == Phase.BRIEFING) {
-                HomeScreen.paint(g, state, getWidth(), getHeight(), hover.scenario(), hover.spot() == Spot.SURPRISE);
+                home.paint(g, getWidth(), getHeight());
             } else {
-                if (backgroundImage != null) {
-                    g.drawImage(
-                        backgroundImage,
-                        0, 0,
-                        getWidth(), getHeight(),
-                        null
-                    );
-                }
+                // Back to front: the ground and the buildings (one cached image), the
+                // astronaut, the light of the hour over all of that, and then the controls,
+                // which the light does not touch.
+                pictures.paint(g, getWidth(), getHeight());
                 Draw.fit(g, getWidth(), getHeight());
-                // Custom pictures — change these numbers to move or resize them.
-                // Habitat base — stays centered
-g.drawImage(baseImage, 350, 375, 175, 150, null);
+                paintAstronaut(g);
+                // The light covers the whole panel, which is larger than the layout when
+                // the window is not the layout's shape.
+                double scale = Draw.scale(getWidth(), getHeight());
+                light.paint(g, state,
+                        (int) Math.floor(-(getWidth() - Draw.WIDTH * scale) / 2 / scale) - 1,
+                        (int) Math.floor(-(getHeight() - Draw.HEIGHT * scale) / 2 / scale) - 1,
+                        (int) Math.ceil(getWidth() / scale) + 2, (int) Math.ceil(getHeight() / scale) + 2);
 
-// Solar — 50 pixels left
-g.drawImage(panelImage, 80, 470, 80, 50, null);
-
-// Greenhouse — 55 pixels right
-g.drawImage(greenImage, 625, 375, 105, 85, null);
-
-// Digger — 35 pixels north
-g.drawImage(drillImage, 327, 180, 60, 50, null);
                 Hint hint = hint();
-                // The tags belong to a sol in play. Under a box in the middle of the screen
-                // they would only show as cut-off pieces round its edge.
+                // The buttons belong to a sol in play. Under a box in the middle of the
+                // screen they would only show as cut-off pieces round its edge.
                 if (phase == Phase.DAY || phase == Phase.NIGHT) {
-                    for (Chip chip : chips()) {
-                        paintChip(g, chip, hint);
-                    }
-                    paintResourceButtons(g, hint);
+                    paintSites(g, hint);
                 }
                 paintDoing(g);
                 paintHud(g, hint);
@@ -358,321 +506,122 @@ g.drawImage(drillImage, 327, 180, 60, 50, null);
             String text = String.format(Locale.ENGLISH, "paint %.1f ms, %.0f repaints a second",
                     sum / (counted * 1e6), seconds > 0 ? counted / seconds : 0);
             g.setFont(Draw.BODY_FONT);
-            Draw.box(g, 12, 64, g.getFontMetrics().stringWidth(text) + 12, 18, BUBBLE, null);
+            Draw.box(g, PAINT_TIME.getX(), PAINT_TIME.getY(), PAINT_TIME.getWidth(), PAINT_TIME.getHeight(),
+                    BUBBLE, null);
             g.setColor(Color.WHITE);
-            g.drawString(text, 18, 77);
+            g.drawString(text, (float) PAINT_TIME.getX() + 6, (float) PAINT_TIME.getY() + 13);
         }
         paintNanos[paintCount % paintNanos.length] = System.nanoTime() - started;
         paintStarted[paintCount % paintStarted.length] = started;
         paintCount++;
     }
 
-    // ---- Small drawing helpers ------------------------------------------------------
-
-    private static Stat text(String text) {
-        return new Stat(null, null, text, Color.WHITE);
-    }
-
-    private static Stat text(String text, Color colour) {
-        return new Stat(null, null, text, colour);
-    }
-
     /** A small button for things that are not part of playing a sol. */
     private void quietButton(Graphics2D g, Rectangle2D area, String text, Spot spot) {
         boolean hot = hover.spot() == spot;
         Draw.box(g, area.getX(), area.getY(), area.getWidth(), area.getHeight(),
-                hot ? new Color(255, 255, 255, 46) : new Color(24, 28, 44, 110), hot ? Color.WHITE : Draw.EDGE);
+                hot ? LIT : QUIET_FILL, hot ? Color.WHITE : Draw.EDGE);
         g.setFont(Draw.SMALL_FONT);
         g.setColor(hot ? Color.WHITE : Draw.CREAM);
         Draw.centred(g, text, area.getCenterX(), area.getCenterY() + 3.5);
     }
 
-    /** A whole number of degrees, never "-0". */
-    private static String degrees(double celsius) {
-        return Math.round(celsius) + "°C";
-    }
-
-    // ---- Building tags --------------------------------------------------------------
-
-    private static final double CHIP_HEIGHT = 22;
-    private static final double CHIP_PAD = 8;
-    private static final double CHIP_GAP = 9;
-    private static final double CHIP_ICON = 11;
-    private static final double PILL_WIDTH = 38;
-    private static final double PILL_HEIGHT = 14;
-    /**
-     * The detector stands just left of the habitat, so its tag and its card hang off to the
-     * left: they reach no further right of it than this, and so stay clear of the habitat's.
-     */
-    private static final double DETECTOR_REACH = 18;
+    // ---- The places: their round buttons and their switches ---------------------------
 
     /**
-     * The tags to show now, one per building. Used to paint and to click. Each holds only
-     * what matters for the next choice; the rest is on a card. A tag that an open card would
-     * partly cover is left out, as is the tag of the card's own instrument.
+     * The round button beside each place, with the number that matters there now, and the
+     * two switches. Whatever {@code hint} points the player at is ringed in the guide's
+     * yellow. Where they all are comes from {@link Site}.
      */
-    private List<Chip> chips() {
+    private void paintSites(Graphics2D g, Hint hint) {
         Outpost o = state.outpost();
         Readings now = state.now();
-        WeatherConditions weather = state.weather();
-        RadiationConditions radiation = state.radiation();
-        boolean dusty = weather.sunlight() < 0.5;
-        boolean storm = radiation.solarEvent();
-
-        List<Chip> all = new ArrayList<>();
-        Card card = card();
-        if (card == null) {
-            return all;
-        }
-        List<Chip> clear = new ArrayList<>();
-        for (Chip chip : all) {
-            if (chip.spot() != selected && !card.box().intersects(chip.box())) {
-                clear.add(chip);
-            }
-        }
-        return clear;
-    }
-
-    /** A tag centred over {@code anchor}, or as near to that as {@code reach} to its right allows. */
-    private Chip chip(Spot spot, double[] anchor, double reach, Color accent, String title, Switch toggle,
-                      List<Stat> stats) {
-        FontMetrics body = getFontMetrics(Draw.BODY_FONT);
-        double width = 2 * CHIP_PAD + getFontMetrics(Draw.TITLE_FONT).stringWidth(title);
-        for (Stat stat : stats) {
-            width += CHIP_GAP + (stat.icon() == null ? 0 : CHIP_ICON + 3) + body.stringWidth(stat.text());
-        }
-        double switchWidth = toggle == null ? 0 : body.stringWidth(toggle.name()) + 5 + PILL_WIDTH;
-        width = Math.ceil(width + (toggle == null ? 0 : CHIP_GAP + switchWidth));
-        double left = Math.round(Math.min(anchor[0] - width / 2, anchor[0] + reach - width));
-        // Every tag sits above its building except the digger's, which hangs below it.
-        boolean below = spot == Spot.DIGGER;
-        double top = Math.round(below ? anchor[1] + 7 : anchor[1] - 7 - CHIP_HEIGHT);
-        Rectangle2D switchArea = null;
-        Rectangle2D pill = null;
-        if (toggle != null) {
-            double right = left + width - CHIP_PAD;
-            pill = new Rectangle2D.Double(right - PILL_WIDTH, top + (CHIP_HEIGHT - PILL_HEIGHT) / 2,
-                    PILL_WIDTH, PILL_HEIGHT);
-            switchArea = new Rectangle2D.Double(right - switchWidth - 4, top, switchWidth + 4 + CHIP_PAD, CHIP_HEIGHT);
-        }
-        return new Chip(spot, new Rectangle2D.Double(left, top, width, CHIP_HEIGHT), anchor[0], below, accent,
-                title, stats, toggle, switchArea, pill);
-    }
-
-    /** Whatever {@code hint} is pointing the player at is ringed in the guide's yellow. */
-    /** Small controls beneath the picture spaces reserved for the three outpost activities. */
-    private void paintResourceButtons(Graphics2D g, Hint hint) {
-        Outpost o = state.outpost();
-        Readings now = state.now();
-        paintResourceButton(g, DIGGER_BUTTON, "DIGGER",
-                "Shield " + Math.round(o.shield() * 100) + "%", EARTH, Spot.DIGGER, null);
-        paintResourceButton(g, PANELS_BUTTON, "SOLAR",
-                Math.round(o.panelsClean() * 100) + "% clean",
-                o.panelsClean() < DUSTY_PANELS ? Glyphs.WARN : SUN_YELLOW, Spot.PANELS, null);
-        paintResourceButton(g, GREENHOUSE_BUTTON, "GROW",
-                String.format(Locale.ENGLISH, "pH %.1f", Soil.ph(o.marsSoil())),
-                LEAF_GREEN, Spot.GREENHOUSE,
-                String.format(Locale.ENGLISH, "Food %.1fd", o.foodDays()));
-
-        paintSmallSwitch(g, HEATER_SWITCH, "HEAT", o.heaterOn(), now.heaterWorking(),
-                hover.spot() == Spot.HEATER);
-        paintSmallSwitch(g, LAMPS_SWITCH, "LAMPS", o.lampsOn(), now.lampsWorking(),
-                hover.spot() == Spot.LAMPS);
+        boolean dusty = o.panelsClean() < DUSTY_PANELS;
+        roundButton(g, Site.DIGGER, "DIGGER", "Shield " + Math.round(o.shield() * 100) + "%", null,
+                EARTH, EARTH_EDGE);
+        roundButton(g, Site.PANELS, "SOLAR", Math.round(o.panelsClean() * 100) + "% clean", null,
+                dusty ? Glyphs.WARN : SUN_YELLOW, dusty ? WARN_EDGE : SUN_EDGE);
+        roundButton(g, Site.GREENHOUSE, "GROW", String.format(Locale.ENGLISH, "pH %.1f", Soil.ph(o.marsSoil())),
+                String.format(Locale.ENGLISH, "Food %.1fd", o.foodDays()), LEAF_GREEN, LEAF_EDGE);
+        toggle(g, Site.HABITAT, Spot.HEATER, "HEAT", o.heaterOn(), now.heaterWorking());
+        toggle(g, Site.GREENHOUSE, Spot.LAMPS, "LAMPS", o.lampsOn(), now.lampsWorking());
 
         Spot target = hint.target();
-        Ellipse2D targetArea = target == Spot.DIGGER ? DIGGER_BUTTON
-                : target == Spot.PANELS ? PANELS_BUTTON
-                : target == Spot.GREENHOUSE ? GREENHOUSE_BUTTON : null;
-        if (targetArea != null) {
-            ring(g, new Rectangle2D.Double(targetArea.getX(), targetArea.getY(),
-                    targetArea.getWidth(), targetArea.getHeight()));
-        }
-        if (target == Spot.HEATER || target == Spot.HABITAT) {
-            ring(g, new Rectangle2D.Double(HEATER_SWITCH.getX() - 3, HEATER_SWITCH.getY() - 3,
-                    HEATER_SWITCH.getWidth() + 6, HEATER_SWITCH.getHeight() + 6));
-        }
-        if (target == Spot.LAMPS) {
-            ring(g, new Rectangle2D.Double(LAMPS_SWITCH.getX() - 3, LAMPS_SWITCH.getY() - 3,
-                    LAMPS_SWITCH.getWidth() + 6, LAMPS_SWITCH.getHeight() + 6));
+        if (target == Spot.HEATER) {
+            ring(g, Site.HABITAT.toggleFrame().getFrame());
+        } else if (target == Spot.LAMPS) {
+            ring(g, Site.GREENHOUSE.toggleFrame().getFrame());
+        } else if (place(target) != null) {
+            Site site = Site.of(place(target));
+            if (hint.whole()) {
+                Rectangle2D all = pictures.seen(site);
+                if (site.button() != null) {
+                    all = all.createUnion(site.button().getFrame());
+                }
+                if (site.toggleFrame() != null) {
+                    all = all.createUnion(site.toggleFrame().getFrame());
+                }
+                ring(g, all);
+            } else if (site.button() != null) {
+                ring(g, site.button());
+            } else {
+                ring(g, pictures.seen(site));
+            }
         }
     }
 
-    private void paintResourceButton(Graphics2D g, Ellipse2D area, String title, String reading,
-                                     Color accent, Spot spot, String secondaryReading) {
-        boolean hot = hover.spot() == spot;
-        g.setColor(new Color(24, 28, 44, 220));
+    /** A round button: the place's name, its reading, and a second, smaller reading or null. */
+    private void roundButton(Graphics2D g, Site site, String name, String reading, String note, Color accent,
+                             Color edge) {
+        Ellipse2D area = site.button();
+        boolean hot = place(hover.spot()) == site.place();
+        g.setColor(BUTTON_FILL);
         g.fill(area);
-        g.setStroke(new java.awt.BasicStroke(hot ? 2.5f : 1.5f));
-        g.setColor(hot ? Color.WHITE : Draw.alpha(accent, 220));
+        g.setStroke(hot ? BUTTON_EDGE_HOT : BUTTON_EDGE);
+        g.setColor(hot ? Color.WHITE : edge);
         g.draw(area);
-        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 9));
+        g.setFont(BUTTON_NAME_FONT);
         g.setColor(accent);
-        Draw.centred(g, title, area.getCenterX(), area.getCenterY() - 13);
-        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 10));
+        Draw.centred(g, name, area.getCenterX(), area.getCenterY() - 13);
+        g.setFont(BUTTON_VALUE_FONT);
         g.setColor(Color.WHITE);
         Draw.centred(g, reading, area.getCenterX(), area.getCenterY() + 1);
-        if (secondaryReading != null) {
-            g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 8));
+        if (note != null) {
+            g.setFont(BUTTON_NOTE_FONT);
             g.setColor(Draw.MUTED);
-            Draw.centred(g, secondaryReading, area.getCenterX(), area.getCenterY() + 14);
+            Draw.centred(g, note, area.getCenterX(), area.getCenterY() + 14);
         }
     }
 
-    private void paintSmallSwitch(Graphics2D g, Rectangle2D area, String label, boolean on,
-                                  boolean working, boolean hot) {
-        Color fill = !on ? SWITCH_OFF : !working ? SWITCH_DEAD : Glyphs.GOOD;
-        RoundRectangle2D shape = new RoundRectangle2D.Double(area.getX(), area.getY(),
-                area.getWidth(), area.getHeight(), 8, 8);
-        g.setColor(new Color(24, 28, 44, 235));
-        g.fill(new RoundRectangle2D.Double(area.getX() - 2, area.getY() - 2,
-                area.getWidth() + 4, area.getHeight() + 4, 8, 8));
-        g.setColor(hot ? Color.WHITE : Draw.EDGE);
-        g.draw(new RoundRectangle2D.Double(area.getX() - 2, area.getY() - 2,
-                area.getWidth() + 4, area.getHeight() + 4, 8, 8));
-        g.setColor(fill);
-        g.fill(shape);
-        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 9));
+    /** A switch: green when on, grey when off, dark red when on with no energy to run on. */
+    private void toggle(Graphics2D g, Site site, Spot spot, String name, boolean on, boolean working) {
+        RoundRectangle2D area = site.toggle();
+        g.setColor(SWITCH_FRAME);
+        g.fill(site.toggleFrame());
+        g.setStroke(Draw.HAIRLINE);
+        g.setColor(hover.spot() == spot ? Color.WHITE : Draw.EDGE);
+        g.draw(site.toggleFrame());
+        g.setColor(!on ? SWITCH_OFF : !working ? SWITCH_DEAD : Glyphs.GOOD);
+        g.fill(area);
+        g.setFont(SWITCH_FONT);
         g.setColor(Draw.INK);
-        Draw.centred(g, label + (on ? " ON" : " OFF"), area.getCenterX(), area.getCenterY() + 3);
-    }
-
-    private void paintChip(Graphics2D g, Chip chip, Hint hint) {
-        Spot hinted = hint.target();
-        Rectangle2D area = chip.box();
-        // The edge is in the tag's own colour, and white under the mouse. Yellow is kept for the guide.
-        boolean hot = hover.spot() == chip.spot();
-        if (chip.below()) {
-            Draw.pointerUp(g, chip.anchorX(), area.getY(), BUBBLE);
-        } else {
-            Draw.pointer(g, chip.anchorX(), area.getMaxY(), BUBBLE);
-        }
-        Draw.box(g, area.getX(), area.getY(), area.getWidth(), area.getHeight(), BUBBLE,
-                hot ? Color.WHITE : Draw.alpha(chip.accent(), 150));
-        if (hot) {
-            g.draw(new Rectangle2D.Double(area.getX() + 1.5, area.getY() + 1.5, area.getWidth() - 3, area.getHeight() - 3));
-        }
-        if (chip.spot() == hinted) {
-            // On a tag with a switch, ring only the building's name unless the switch is meant too.
-            ring(g, chip.switchArea() == null || hint.wholeTag() ? area : new Rectangle2D.Double(area.getX(),
-                    area.getY(), chip.switchArea().getX() - area.getX() - 2, area.getHeight()));
-        }
-
-        double x = area.getX() + CHIP_PAD;
-        float baseline = (float) area.getY() + 15;
-        g.setFont(Draw.TITLE_FONT);
-        g.setColor(chip.accent());
-        g.drawString(chip.title(), (float) x, baseline);
-        x += g.getFontMetrics().stringWidth(chip.title());
-        g.setFont(Draw.BODY_FONT);
-        for (Stat stat : chip.stats()) {
-            x += CHIP_GAP;
-            if (stat.icon() != null) {
-                stat.icon().draw(g, x, area.getY() + 5.5, CHIP_ICON, stat.iconColour());
-                x += CHIP_ICON + 3;
-            }
-            g.setColor(stat.textColour());
-            g.drawString(stat.text(), (float) x, baseline);
-            x += g.getFontMetrics().stringWidth(stat.text());
-        }
-        if (chip.toggle() != null) {
-            paintSwitch(g, chip, baseline);
-            if (chip.toggle().spot() == hinted) {
-                ring(g, chip.switchArea());
-            }
-        }
+        Draw.centred(g, name + (on ? " ON" : " OFF"), area.getCenterX(), area.getCenterY() + 3);
     }
 
     /** The yellow ring round whatever the guide is talking about. */
-    private static void ring(Graphics2D g, Rectangle2D area) {
+    private void ring(Graphics2D g, Rectangle2D area) {
+        ringBox.setRect(area.getX() - 1, area.getY() - 1, area.getWidth() + 2, area.getHeight() + 2);
         g.setStroke(Draw.THICK);
         g.setColor(Glyphs.POWER);
-        g.draw(new Rectangle2D.Double(area.getX() - 1, area.getY() - 1, area.getWidth() + 2, area.getHeight() + 2));
+        g.draw(ringBox);
     }
 
-    /**
-     * A switch: its name and a pill with a knob. Green with the knob to the right is on;
-     * grey with the knob to the left is off; dark red is on but with no energy to run on.
-     */
-    private void paintSwitch(Graphics2D g, Chip chip, float baseline) {
-        Switch toggle = chip.toggle();
-        Rectangle2D pill = chip.pill();
-        boolean hot = hover.spot() == toggle.spot();
-        boolean dead = toggle.on() && !toggle.working();
-        g.setFont(Draw.BODY_FONT);
-        g.setColor(dead ? Glyphs.BAD : Color.WHITE);
-        g.drawString(toggle.name(), (float) chip.switchArea().getX() + 4, baseline);
-
-        RoundRectangle2D shape = new RoundRectangle2D.Double(pill.getX(), pill.getY(), pill.getWidth(),
-                pill.getHeight(), pill.getHeight(), pill.getHeight());
-        g.setColor(!toggle.on() ? SWITCH_OFF : dead ? SWITCH_DEAD : Glyphs.GOOD);
-        g.fill(shape);
-        g.setStroke(Draw.HAIRLINE);
-        g.setColor(hot ? Color.WHITE : dead ? Glyphs.BAD : new Color(12, 14, 24));
-        g.draw(shape);
-        double knob = pill.getHeight() - 4;
-        double knobX = toggle.on() ? pill.getMaxX() - 2 - knob : pill.getX() + 2;
-        g.setColor(toggle.on() ? Color.WHITE : new Color(206, 210, 222));
-        g.fill(new Ellipse2D.Double(knobX, pill.getY() + 2, knob, knob));
-        g.setFont(SWITCH_FONT);
-        if (toggle.on()) {
-            g.setColor(dead ? Draw.CREAM : Draw.INK);
-            g.drawString("ON", (float) pill.getX() + 7, (float) pill.getY() + 10.5f);
-        } else {
-            g.setColor(Draw.CREAM);
-            g.drawString("OFF", (float) pill.getX() + 16, (float) pill.getY() + 10.5f);
-        }
-    }
-
-    // ---- The astronaut's label ------------------------------------------------------
-
-    /** A small label over the astronaut, or at the airlock when they are indoors, saying what they are doing. */
-    private void paintDoing(Graphics2D g) {
-        Outpost o = state.outpost();
-        Readings now = state.now();
-        Phase phase = state.phase();
-        if (phase != Phase.DAY && phase != Phase.NIGHT) {
-            return;
-        }
-        String doing;
-        Color colour = Color.WHITE;
-        double[] at;
-        if (phase == Phase.NIGHT) {
-            doing = "Sleeping";
-            at = scene.doorTop();
-        } else if (o.walking()) {
-            doing = "Walking";
-            at = scene.headAt(figureU, figureV);
-        } else if (o.place() == Place.HABITAT) {
-            doing = "Resting";
-            at = scene.doorTop();
-        } else {
-            at = scene.headAt(figureU, figureV);
-            switch (o.place()) {
-                case PANELS:
-                    doing = o.panelsClean() >= 0.995 ? "All clean!" : "Brushing";
-                    break;
-                case DIGGER:
-                    if (o.shield() >= 1) {
-                        doing = "Shield finished";
-                    } else if (now.diggerWorking()) {
-                        doing = "Digging";
-                    } else {
-                        doing = "Digger has no energy";
-                        colour = Glyphs.BAD;
-                    }
-                    break;
-                default:
-                    doing = o.cropsReady() > 0.02 ? "Picking food" : "Nothing to pick yet";
-                    break;
-            }
-        }
-        g.setFont(Draw.SMALL_FONT);
-        double width = g.getFontMetrics().stringWidth(doing) + 12;
-        double left = Math.round(at[0] - width / 2);
-        double top = Math.round(at[1] - 5 - 16);
-        Draw.box(g, left, top, width, 16, BUBBLE, Draw.alpha(colour, 120));
-        g.setColor(colour);
-        g.drawString(doing, (float) left + 6, (float) top + 12);
+    /** The same ring round a round button. */
+    private void ring(Graphics2D g, Ellipse2D button) {
+        ringRound.setFrame(button.getX() - 3, button.getY() - 3, button.getWidth() + 6, button.getHeight() + 6);
+        g.setStroke(Draw.THICK);
+        g.setColor(Glyphs.POWER);
+        g.draw(ringRound);
     }
 
     // ---- Cards ----------------------------------------------------------------------
@@ -684,7 +633,7 @@ g.drawImage(drillImage, 327, 180, 60, 50, null);
 
     /** The card for whatever is selected, or null when none is open. Used to paint and to click. */
     private Card card() {
-        if (state == null || state.phase() != Phase.DAY) {
+        if (state == null || state.phase() != Phase.DAY || selected == Spot.NONE) {
             return null;
         }
         WeatherConditions weather = state.weather();
@@ -692,20 +641,19 @@ g.drawImage(drillImage, 327, 180, 60, 50, null);
         Readings now = state.now();
         String title;
         Color accent;
-        double[] anchor = null;
-        double reach = Double.POSITIVE_INFINITY;
+        Rectangle2D reading = null;
         List<Fact> facts = new ArrayList<>();
         List<String> sentences = new ArrayList<>();
         switch (selected) {
             case WEATHER:
-                title = "Weather station";
+                title = "Weather";
                 accent = SKY_BLUE;
-                anchor = scene.weatherAnchor;
+                reading = StatusStrip.WEATHER;
                 facts.add(new Fact("Sky", weather.sunlight() < 0.5 ? "Dusty" : "Clear"));
                 facts.add(new Fact("Sunlight getting through",
                         String.format(Locale.ENGLISH, "%.0f%%", weather.sunlight() * 100)));
-                facts.add(new Fact("Coldest and warmest today",
-                        degrees(weather.minTempC()) + " and " + degrees(weather.maxTempC())));
+                facts.add(new Fact("Coldest and warmest today", StatusStrip.degrees(weather.minTempC())
+                        + " and " + StatusStrip.degrees(weather.maxTempC())));
                 if (!Double.isNaN(weather.pressurePa())) {
                     facts.add(new Fact("Air pressure", String.format(Locale.ENGLISH, "%.0f Pa", weather.pressurePa())));
                 }
@@ -728,16 +676,15 @@ g.drawImage(drillImage, 327, 180, 60, 50, null);
                     sentences.add("No rover reading today. Showing " + DATE.format(weather.measuredOn()) + ".");
                 }
                 break;
-            case DETECTOR:
-                title = radiation.solarEvent() ? "Solar storm!" : "Radiation detector";
+            case RADIATION:
+                title = radiation.solarEvent() ? "Solar storm!" : "Radiation";
                 accent = radiation.solarEvent() ? ALERT : Color.WHITE;
-                anchor = scene.detectorAnchor;
-                reach = DETECTOR_REACH;
+                reading = StatusStrip.RADIATION;
                 facts.add(new Fact("Radiation today", String.format(Locale.ENGLISH, "%.2f mSv", radiation.doseMsv())));
                 sentences.add(radiation.solarEvent() ? "A solar storm has raised it today."
                         : "No solar storm today.");
                 sentences.add(String.format(Locale.ENGLISH,
-                        "The soil bank stops %.0f%% while your astronaut is in the habitat.",
+                        "The shield stops %.0f%% while your astronaut is in the habitat.",
                         now.shieldBlocks() * 100));
                 sentences.add("Outside and in the greenhouse nothing stops it.");
                 break;
@@ -747,10 +694,7 @@ g.drawImage(drillImage, 327, 180, 60, 50, null);
                 sentences.add("Real NASA data, saved copy (not live).");
                 sentences.add("Weather: Curiosity rover, NASA/JPL-Caltech/CAB.");
                 sentences.add("Solar storms: NASA CCMC DONKI.");
-                sentences.add("Ground: real heights at Curiosity's landing site in Gale Crater, NASA MOLA.");
-                sentences.add(String.format(Locale.ENGLISH,
-                        "One tile is about %.1f km. Hills drawn %dx taller. Buildings not to scale.",
-                        scene.tileKm(), Scene.HEIGHT_EXAGGERATION));
+                sentences.add("The buildings and the astronaut are not drawn to scale.");
                 break;
             default:
                 return null;
@@ -762,20 +706,17 @@ g.drawImage(drillImage, 327, 180, 60, 50, null);
         }
         double height = CARD_HEAD + FACT_ROW * facts.size() + NOTE_ROW * notes.size()
                 + (facts.isEmpty() || notes.isEmpty() ? 0 : 4) + 8;
-        double left;
-        double top;
-        if (anchor == null) {
-            left = Math.round((Draw.WIDTH - CARD_WIDTH) / 2);
-            top = Math.round((Draw.HEIGHT - height) / 2);
-        } else {
-            left = Math.min(anchor[0] - CARD_WIDTH / 2, anchor[0] + reach - CARD_WIDTH);
-            left = Math.round(Math.max(6, Math.min(Draw.WIDTH - 6 - CARD_WIDTH, left)));
-            top = Math.round(Math.max(StatusStrip.AREA.getMaxY() + 6, anchor[1] - 7 - height));
+        if (reading == null) {
+            return new Card(new Rectangle2D.Double(Math.round((Draw.WIDTH - CARD_WIDTH) / 2),
+                    Math.round((Draw.HEIGHT - height) / 2), CARD_WIDTH, height), 0, false, title, accent, facts, notes);
         }
-        // No pointer if the card had to be pushed down over its own instrument.
-        boolean pointed = anchor != null && top + height <= anchor[1] - 6;
-        return new Card(new Rectangle2D.Double(left, top, CARD_WIDTH, height), anchor == null ? 0 : anchor[0],
-                pointed, title, accent, facts, notes);
+        // Under the strip, below its reading, and to the right of the digger's button: there
+        // an open card covers no button and no switch, and cuts none in half.
+        double left = Math.max(reading.getCenterX() - CARD_WIDTH / 2, Site.DIGGER.button().getMaxX() + 6);
+        left = Math.round(Math.max(6, Math.min(Draw.WIDTH - 6 - CARD_WIDTH, left)));
+        boolean pointed = reading.getCenterX() > left + 10 && reading.getCenterX() < left + CARD_WIDTH - 10;
+        return new Card(new Rectangle2D.Double(left, StatusStrip.AREA.getMaxY() + 7, CARD_WIDTH, height),
+                reading.getCenterX(), pointed, title, accent, facts, notes);
     }
 
     private void paintCard(Graphics2D g) {
@@ -785,7 +726,7 @@ g.drawImage(drillImage, 327, 180, 60, 50, null);
         }
         Rectangle2D area = card.box();
         if (card.pointed()) {
-            Draw.pointer(g, card.anchorX(), area.getMaxY(), Draw.CARD_FILL);
+            Draw.pointerUp(g, card.anchorX(), area.getY(), Draw.CARD_FILL);
         }
         Draw.box(g, area.getX(), area.getY(), area.getWidth(), area.getHeight(), Draw.CARD_FILL, card.accent());
         g.setFont(Draw.TITLE_FONT);
@@ -818,19 +759,14 @@ g.drawImage(drillImage, 327, 180, 60, 50, null);
 
     // ---- Mouse ----------------------------------------------------------------------
 
-    /** What is under the mouse, in the 800 x 600 layout the scene is drawn in. */
-    private Hit hitAt(MouseEvent e) {
+    /** What is at (x, y) in the 800 x 600 layout. On the home screen nothing: HomeScreen answers for itself. */
+    private Hit hitAt(double x, double y) {
         if (state == null) {
             return NOTHING;
         }
-        double scale = Draw.scale(getWidth(), getHeight());
-        double x = (e.getX() - (getWidth() - Draw.WIDTH * scale) / 2) / scale;
-        double y = (e.getY() - (getHeight() - Draw.HEIGHT * scale) / 2) / scale;
         switch (state.phase()) {
             case BRIEFING:
-                Scenario scenario = HomeScreen.scenarioAt(state, x, y);
-                return scenario != null ? new Hit(Spot.SCENARIO, scenario)
-                        : HomeScreen.surpriseAt(state, x, y) ? new Hit(Spot.SURPRISE) : NOTHING;
+                return NOTHING;
             case WON:
             case LOST:
                 return Notices.PLAY_AGAIN_BUTTON.contains(x, y) ? new Hit(Spot.PLAY_AGAIN) : NOTHING;
@@ -848,7 +784,11 @@ g.drawImage(drillImage, 327, 180, 60, 50, null);
         }
     }
 
-    /** What is at (x, y) while a sol is being played. */
+    /**
+     * What is at (x, y) while a sol is being played. Everything here can be seen: a button,
+     * a switch, a reading in the strip, or a part of a building's picture that is not
+     * see-through. Open ground is nothing.
+     */
     private Spot spotByDay(double x, double y) {
         Card card = card();
         if (card != null && card.box().contains(x, y)) {
@@ -869,47 +809,40 @@ g.drawImage(drillImage, 327, 180, 60, 50, null);
         if (HOW_BUTTON.contains(x, y)) {
             return Spot.HOW;
         }
+        if (StatusStrip.WEATHER.contains(x, y)) {
+            return Spot.WEATHER;
+        }
+        if (StatusStrip.RADIATION.contains(x, y)) {
+            return Spot.RADIATION;
+        }
         if (StatusStrip.ENERGY.contains(x, y)) {
             return Spot.ENERGY;
         }
-        if (HEATER_SWITCH.contains(x, y)) return Spot.HEATER;
-        if (LAMPS_SWITCH.contains(x, y)) return Spot.LAMPS;
-        if (DIGGER_BUTTON.contains(x, y)) return Spot.DIGGER;
-        if (PANELS_BUTTON.contains(x, y)) return Spot.PANELS;
-        if (GREENHOUSE_BUTTON.contains(x, y)) return Spot.GREENHOUSE;
-        for (Chip chip : chips()) {
-            if (chip.switchArea() != null && chip.switchArea().contains(x, y)) {
-                return chip.toggle().spot();
+        // The switches first: one of them lies over the corner of its building's picture.
+        if (Site.HABITAT.toggleFrame().contains(x, y)) {
+            return Spot.HEATER;
+        }
+        if (Site.GREENHOUSE.toggleFrame().contains(x, y)) {
+            return Spot.LAMPS;
+        }
+        for (Site site : Site.values()) {
+            if ((site.button() != null && site.button().contains(x, y)) || pictures.solid(site, x, y)) {
+                return spot(site.place());
             }
-            if (chip.box().contains(x, y)) {
-                return chip.spot();
-            }
-        }
-        // The buildings themselves. The small ones come first so a big neighbour cannot hide them.
-        if (scene.diggerArea.contains(x, y)) {
-            return Spot.DIGGER;
-        }
-        if (scene.habitatArea.contains(x, y)) {
-            return Spot.HABITAT;
-        }
-        if (scene.greenhouseArea.contains(x, y)) {
-            return Spot.GREENHOUSE;
-        }
-        if (scene.solarArea.contains(x, y)) {
-            return Spot.PANELS;
         }
         return Spot.NONE;
     }
 
     private void click(Hit hit) {
-        // A click on a card's instrument opens the card, a click on an open card does nothing,
-        // and a click anywhere else closes the card and then does what it would do anyway.
+        // A click on a reading opens its card and a second click on it closes the card again.
+        // A click on an open card does nothing, and a click anywhere else closes the card
+        // and then does what it would do anyway.
         boolean wasOpen = selected != Spot.NONE;
         switch (hit.spot()) {
             case WEATHER:
-            case DETECTOR:
+            case RADIATION:
             case ABOUT:
-                selected = hit.spot();
+                selected = selected == hit.spot() ? Spot.NONE : hit.spot();
                 break;
             case CARD:
                 break;
@@ -967,12 +900,6 @@ g.drawImage(drillImage, 327, 180, 60, 50, null);
             case PLAY_AGAIN:
                 actions.home();
                 break;
-            case SCENARIO:
-                actions.start(hit.scenario());
-                break;
-            case SURPRISE:
-                actions.startSurprise();
-                break;
             default:
                 break;
         }
@@ -998,11 +925,25 @@ g.drawImage(drillImage, 327, 180, 60, 50, null);
         }
     }
 
+    /** The spot that sends the astronaut to {@code place}. */
+    private static Spot spot(Place place) {
+        switch (place) {
+            case GREENHOUSE:
+                return Spot.GREENHOUSE;
+            case PANELS:
+                return Spot.PANELS;
+            case DIGGER:
+                return Spot.DIGGER;
+            default:
+                return Spot.HABITAT;
+        }
+    }
+
     private void point(Hit hit) {
+        boolean hand = hit.spot() != Spot.NONE && hit.spot() != Spot.CARD && hit.spot() != Spot.ENERGY;
+        setCursor(Cursor.getPredefinedCursor(hand ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
         if (!hit.equals(hover)) {
             hover = hit;
-            boolean hand = hit.spot() != Spot.NONE && hit.spot() != Spot.CARD && hit.spot() != Spot.ENERGY;
-            setCursor(Cursor.getPredefinedCursor(hand ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
             repaint();
         }
     }
@@ -1222,9 +1163,11 @@ g.drawImage(drillImage, 327, 180, 60, 50, null);
                 return o.lampsOn() ? "Click: switch the grow lamps off."
                         : "Click: switch the grow lamps on. They grow food and use energy.";
             case WEATHER:
-                return "Click: read the weather. The clock stops.";
-            case DETECTOR:
-                return "Click: read the radiation. The clock stops.";
+                return selected == Spot.WEATHER ? "Click: close the weather card."
+                        : "Click: read the weather. The clock stops.";
+            case RADIATION:
+                return selected == Spot.RADIATION ? "Click: close the radiation card."
+                        : "Click: read the radiation. The clock stops.";
             case SLEEP:
                 return "Click: go to bed now and skip to the night.";
             case ENERGY:
@@ -1239,35 +1182,46 @@ g.drawImage(drillImage, 327, 180, 60, 50, null);
     private void paintHud(Graphics2D g, Hint hint) {
         Phase phase = state.phase();
         StatusStrip.paint(g, state);
+        // A reading in the strip lights up under the mouse, and stays lit while its card is open.
+        if (phase == Phase.DAY) {
+            g.setColor(LIT);
+            if (hover.spot() == Spot.WEATHER || selected == Spot.WEATHER) {
+                g.fill(StatusStrip.WEATHER);
+            }
+            if (hover.spot() == Spot.RADIATION || selected == Spot.RADIATION) {
+                g.fill(StatusStrip.RADIATION);
+            }
+        }
 
         // Temperature is explained in plain language instead of adding another meter.
         if (phase == Phase.DAY && state.now().outsideC() < 0 && !state.outpost().heaterOn()) {
+            Rectangle2D heater = Site.HABITAT.toggle().getFrame();
             g.setFont(Draw.BODY_FONT);
-            String warning = "You're getting cold — turn on the habitat heater";
+            String warning = "You're getting cold \u2014 turn on the habitat heater";
             int warningWidth = g.getFontMetrics().stringWidth(warning) + 20;
-            Draw.box(g, HEATER_SWITCH.getX() - 12, HEATER_SWITCH.getY() + 20,
-                    warningWidth, 20, new Color(80, 24, 32, 225), Glyphs.BAD);
+            Draw.box(g, heater.getX() - 12, heater.getY() + 20, warningWidth, 20, COLD_FILL, Glyphs.BAD);
             g.setColor(Color.WHITE);
-            g.drawString(warning, (float) HEATER_SWITCH.getX() - 2,
-                    (float) HEATER_SWITCH.getY() + 34);
+            g.drawString(warning, (float) heater.getX() - 2, (float) heater.getY() + 34);
         }
 
-        // A solar storm is news, so it gets a line of its own under the strip.
+        // A solar storm is news, so it gets a line of its own under the strip. A card from
+        // the strip opens in the same place, and while one is open the line makes way for it.
         RadiationConditions radiation = state.radiation();
-        if (radiation.solarEvent() && radiation.detail() != null) {
+        if (radiation.solarEvent() && radiation.detail() != null
+                && selected != Spot.WEATHER && selected != Spot.RADIATION) {
             g.setFont(Draw.BODY_FONT);
             int width = g.getFontMetrics().stringWidth(radiation.detail()) + 24;
             double top = StatusStrip.AREA.getMaxY() + 6;
-            Draw.box(g, (Draw.WIDTH - width) / 2.0, top, width, 22, new Color(110, 20, 70, 235), ALERT);
+            Draw.box(g, (Draw.WIDTH - width) / 2.0, top, width, 22, STORM_FILL, ALERT);
             g.setColor(Color.WHITE);
             Draw.centred(g, radiation.detail(), Draw.WIDTH / 2.0, top + 15);
         }
 
-        // The guide can point at two things that are not tags: the battery and the SLEEP button.
+        // The guide can point at two things that are not places: the battery and the SLEEP button.
         if (hint.target() == Spot.ENERGY) {
             Rectangle2D battery = StatusStrip.ENERGY;
-            ring(g, new Rectangle2D.Double(battery.getX() + 2, battery.getY() + 2,
-                    battery.getWidth() - 4, battery.getHeight() - 4));
+            ringBox.setRect(battery.getX() + 2, battery.getY() + 2, battery.getWidth() - 4, battery.getHeight() - 4);
+            ring(g, ringBox);
         }
         boolean teaching = lesson != Step.NONE;
         if (phase == Phase.DAY || phase == Phase.NIGHT) {
@@ -1289,7 +1243,6 @@ g.drawImage(drillImage, 327, 180, 60, 50, null);
                 quietButton(g, HOW_BUTTON, "How to play", Spot.HOW);
             }
         }
-
     }
 
     /**

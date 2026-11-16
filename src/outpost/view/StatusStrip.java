@@ -1,6 +1,7 @@
 package outpost.view;
 
 import java.awt.Color;
+import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.geom.Arc2D;
 import java.awt.geom.Ellipse2D;
@@ -13,22 +14,39 @@ import outpost.shared.GameState;
 import outpost.shared.Glyphs;
 import outpost.shared.Outpost;
 import outpost.shared.Phase;
+import outpost.shared.RadiationConditions;
 import outpost.shared.Readings;
 
 /**
- * The strip along the top of the outpost screen. It holds what the player is looking after
- * and nothing else: which sol it is and how far the Sun has got, the astronaut's health, the
- * energy in the battery. Food is shown on the greenhouse control instead. It draws from the
- * GameState and changes nothing.
+ * The strip along the top of the outpost screen. It holds what the player is looking after:
+ * which sol it is and how far the Sun has got, the astronaut's health and the energy in the
+ * battery. Between those two are the day's two real readings, small: how cold it is outside
+ * now and how much radiation there is today. Each of the two opens a card with the rest of
+ * what the rover measured (OutpostView owns the click and the card). Food is shown on the
+ * greenhouse's button instead. The strip draws from the GameState and changes nothing.
  */
 final class StatusStrip {
 
     static final Rectangle2D AREA = new Rectangle2D.Double(12, 10, 776, 48);
     /** The battery's part of the strip. The view explains the moon mark when the mouse is over it. */
     static final Rectangle2D ENERGY = new Rectangle2D.Double(538, 10, 250, 48);
+    /** The temperature outside now. As tall as the strip, so a finger can hit it; a click opens the weather card. */
+    static final Rectangle2D WEATHER = new Rectangle2D.Double(380, 10, 74, 48);
+    /** Today's radiation, pink on a solar storm sol. A click opens the radiation card. */
+    static final Rectangle2D RADIATION = new Rectangle2D.Double(454, 10, 84, 48);
+    /** The pink of a solar storm. */
+    static final Color ALERT = new Color(255, 96, 160);
     private static final Color EMPTY_BAR = new Color(62, 66, 88);
     private static final Color BUBBLE = new Color(24, 28, 44, 222);
     private static final Color SUN = new Color(255, 205, 80);
+    private static final Color DIVIDER = new Color(255, 255, 255, 40);
+    private static final Color TRACK_DAY = Draw.alpha(Color.WHITE, 96);
+    private static final Color TRACK_NIGHT = Draw.alpha(Color.WHITE, 46);
+    /** What the dark part of a crescent moon is drawn in: on the energy bar, and in the Sun's track. */
+    private static final Color MOON_SHADE = new Color(24, 28, 44);
+    private static final Color TRACK_MOON_SHADE = BUBBLE.darker();
+    private static final Color MARK_EDGE = new Color(16, 18, 30);
+    private static final Font READING_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 14);
     private static final DateTimeFormatter DATE =
             DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH);
 
@@ -67,7 +85,57 @@ final class StatusStrip {
                     break;
             }
         }
+
+        // The two readings open their cards only while a sol is being played.
+        boolean opens = state.phase() == Phase.DAY;
+        boolean dusty = state.weather().sunlight() < 0.5;
+        reading(g, WEATHER, dusty ? "Dusty sky" : "Outside", dusty ? Glyphs.WARN : Color.WHITE,
+                degrees(state.now().outsideC()), Color.WHITE, opens);
+        RadiationConditions radiation = state.radiation();
+        Color tone = radiation.solarEvent() ? ALERT : Color.WHITE;
+        reading(g, RADIATION, "Radiation", tone,
+                String.format(Locale.ENGLISH, "%.2f mSv", radiation.doseMsv()), tone, opens);
         paintEnergy(g, state);
+    }
+
+    /** A whole number of degrees, never "-0". */
+    static String degrees(double celsius) {
+        return Math.round(celsius) + "\u00b0C";
+    }
+
+    /** The small arrow after a reading's name, pointing down to where its card opens. Made once. */
+    private static final Path2D.Double MORE = new Path2D.Double();
+
+    static {
+        MORE.moveTo(0, 0);
+        MORE.lineTo(7, 0);
+        MORE.lineTo(3.5, 4.5);
+        MORE.closePath();
+    }
+
+    /**
+     * One of the day's real readings: its name, and under it the reading itself. While
+     * {@code opens}, a small arrow after the name says that a click brings more.
+     */
+    private static void reading(Graphics2D g, Rectangle2D area, String name, Color nameColour, String value,
+                                Color valueColour, boolean opens) {
+        float left = (float) area.getX() + 9;
+        float top = (float) area.getY();
+        g.setColor(DIVIDER);
+        g.fillRect((int) area.getX(), (int) top + 7, 1, (int) area.getHeight() - 14);
+        g.setFont(Draw.BODY_FONT);
+        g.setColor(nameColour);
+        g.drawString(name, left, top + 17);
+        if (opens) {
+            double x = left + g.getFontMetrics().stringWidth(name) + 5;
+            g.translate(x, top + 10.5);
+            g.setColor(Draw.MUTED);
+            g.fill(MORE);
+            g.translate(-x, -(top + 10.5));
+        }
+        g.setFont(READING_FONT);
+        g.setColor(valueColour);
+        g.drawString(value, left, top + 38);
     }
 
     /** How far into its section a bar's trend is written, after the bar's name. */
@@ -115,7 +183,7 @@ final class StatusStrip {
         double height = 14;
         double centre = left + width / 2;
         g.setStroke(Draw.HAIRLINE);
-        g.setColor(Draw.alpha(Color.WHITE, night ? 46 : 96));
+        g.setColor(night ? TRACK_NIGHT : TRACK_DAY);
         g.draw(new Line2D.Double(left - 3, horizon + 0.5, left + width + 3, horizon + 0.5));
         g.draw(new Arc2D.Double(left, horizon - height, width, 2 * height, 0, 180, Arc2D.OPEN));
         double angle = Math.PI * (night ? now.nightShare() : now.dayShare());
@@ -124,7 +192,7 @@ final class StatusStrip {
         if (night) {
             g.setColor(Draw.MOON);
             g.fill(new Ellipse2D.Double(x - 4, y - 4, 8, 8));
-            g.setColor(BUBBLE.darker());
+            g.setColor(TRACK_MOON_SHADE);
             g.fill(new Ellipse2D.Double(x - 1.5, y - 5, 7, 7));
         } else {
             g.setColor(SUN);
@@ -135,7 +203,7 @@ final class StatusStrip {
     /** Starts a section of the strip at {@code left}: a faint line, an icon and a name. */
     private static void section(Graphics2D g, double left, Icon icon, Color colour, String name) {
         double top = AREA.getY();
-        g.setColor(new Color(255, 255, 255, 40));
+        g.setColor(DIVIDER);
         g.fill(new Rectangle2D.Double(left, top + 7, 1, AREA.getHeight() - 14));
         icon.draw(g, left + 12, top + 7, 12, colour);
         g.setFont(Draw.BODY_FONT);
@@ -152,7 +220,7 @@ final class StatusStrip {
         g.fill(new Rectangle2D.Double(left, top, width * Draw.clamp(share), 8));
     }
 
-    /** Health or food: a name, a number and a bar. */
+    /** Health: a name, a number and a bar. */
     private static void meter(Graphics2D g, double left, double width, Icon icon, Color colour, String name,
                               String value, double share) {
         section(g, left, icon, colour, name);
@@ -203,7 +271,7 @@ final class StatusStrip {
         boolean tooLittle = now.nightNeed() > capacity || (late && o.energy() < now.nightNeed() - 0.5);
         Color mark = tooLittle ? Glyphs.BAD : Draw.MOON;
         double markX = Math.round(barLeft + barWidth * Draw.clamp(now.nightNeed() / capacity));
-        g.setColor(new Color(16, 18, 30));
+        g.setColor(MARK_EDGE);
         g.fill(new Rectangle2D.Double(markX - 2, top + 29, 4, 14));
         g.setColor(mark);
         g.fill(new Rectangle2D.Double(markX - 1, top + 29, 2, 14));
@@ -214,7 +282,7 @@ final class StatusStrip {
     private static void moon(Graphics2D g, double x, double y, Color colour) {
         g.setColor(colour);
         g.fill(new Ellipse2D.Double(x - 4, y - 4, 8, 8));
-        g.setColor(new Color(24, 28, 44));
+        g.setColor(MOON_SHADE);
         g.fill(new Ellipse2D.Double(x - 1.5, y - 5, 7, 7));
     }
 

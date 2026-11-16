@@ -47,8 +47,8 @@ final class Notices {
 
     /**
      * Before sol 1: the mission's helmet, its name, its real dates and what really happened
-     * then. The helmet is the one from the mission's card on the home screen; for a surprise
-     * mission it shows what the days that were picked are really like.
+     * then. The helmet is the one the home screen showed for the mission, standing still;
+     * for a surprise mission it shows what the days that were picked are really like.
      */
     static void paintStart(Graphics2D g, GameState state, Component owner, boolean hot) {
         Scenario mission = state.mission();
@@ -56,7 +56,7 @@ final class Notices {
         Rectangle2D box = START_BOX;
         double centre = box.getCenterX();
         Draw.box(g, box.getX(), box.getY(), box.getWidth(), box.getHeight(), Draw.CARD_FILL, Glyphs.POWER);
-        HelmetArt.paint(g, mission.helmet(), false, centre - START_HELMET / 2, box.getY() + 12, START_HELMET);
+        Helmet3D.paintStill(g, mission.helmet(), centre - START_HELMET / 2, box.getY() + 12, START_HELMET);
         g.setFont(Draw.HEADLINE_FONT);
         g.setColor(Color.WHITE);
         Draw.centred(g, mission.title(), centre, box.getY() + 156);
@@ -122,8 +122,8 @@ final class Notices {
         if (lines[RADIATION] != 0) {
             double stopped = state.now().shieldBlocks();
             String why = stopped >= 0.005
-                    ? String.format(Locale.ENGLISH, "Radiation (the soil bank stopped %.0f%%)", stopped * 100)
-                    : "Radiation (no soil bank to stop it)";
+                    ? String.format(Locale.ENGLISH, "Radiation (the shield stopped %.0f%%)", stopped * 100)
+                    : "Radiation (no shield to stop it)";
             y = row(g, left, right, y, why, signed(lines[RADIATION]), Glyphs.WARN);
         }
         if (lines[COLD] != 0) {

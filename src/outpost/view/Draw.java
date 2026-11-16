@@ -76,24 +76,13 @@ final class Draw {
     /** A flat, bright button with dark text in {@code font}. It lights up while {@code hot}. */
     static void button(Graphics2D g, Rectangle2D area, String text, Font font, Color fill, boolean hot) {
         box(g, area.getX(), area.getY(), area.getWidth(), area.getHeight(),
-                hot ? Mesh.scale(fill, 1.12) : fill, hot ? Color.WHITE : new Color(20, 22, 34));
+                hot ? shade(fill, 1.12) : fill, hot ? Color.WHITE : new Color(20, 22, 34));
         g.setFont(font);
         g.setColor(INK);
         centred(g, text, area.getCenterX(), area.getCenterY() + font.getSize() * 0.36);
     }
 
-    /** The small triangle under a tag or card that points at the thing it is about. */
-    static void pointer(Graphics2D g, double x, double bottom, Color colour) {
-        Path2D.Double pointer = new Path2D.Double();
-        pointer.moveTo(x - 6, bottom - 1);
-        pointer.lineTo(x + 6, bottom - 1);
-        pointer.lineTo(x, bottom + 7);
-        pointer.closePath();
-        g.setColor(colour);
-        g.fill(pointer);
-    }
-
-    /** The same triangle on top of a tag that hangs below its thing, pointing up at it. */
+    /** The small triangle on top of a card that hangs below the thing it is about, pointing up at it. */
     static void pointerUp(Graphics2D g, double x, double top, Color colour) {
         Path2D.Double pointer = new Path2D.Double();
         pointer.moveTo(x - 6, top + 1);
@@ -106,6 +95,25 @@ final class Draw {
 
     static Color alpha(Color colour, int alpha) {
         return new Color(colour.getRed(), colour.getGreen(), colour.getBlue(), alpha);
+    }
+
+    /** {@code colour} made darker (a factor under 1) or brighter (over 1). How see-through it is stays the same. */
+    static Color shade(Color colour, double factor) {
+        return new Color(channel(colour.getRed() * factor), channel(colour.getGreen() * factor),
+                channel(colour.getBlue() * factor), colour.getAlpha());
+    }
+
+    /** The colour {@code share} of the way from {@code from} to {@code to}: 0.0 is the first and 1.0 the second. */
+    static Color mix(Color from, Color to, double share) {
+        double k = clamp(share);
+        return new Color(channel(from.getRed() + (to.getRed() - from.getRed()) * k),
+                channel(from.getGreen() + (to.getGreen() - from.getGreen()) * k),
+                channel(from.getBlue() + (to.getBlue() - from.getBlue()) * k),
+                channel(from.getAlpha() + (to.getAlpha() - from.getAlpha()) * k));
+    }
+
+    private static int channel(double value) {
+        return (int) Math.max(0, Math.min(255, Math.round(value)));
     }
 
     static void centred(Graphics2D g, String text, double centreX, double baseline) {
