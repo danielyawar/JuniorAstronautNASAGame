@@ -30,6 +30,7 @@ import outpost.shared.PlayerActions;
 import outpost.shared.RadiationConditions;
 import outpost.shared.Readings;
 import outpost.shared.Scenario;
+import outpost.shared.Soil;
 import outpost.shared.UvIndex;
 import outpost.shared.WeatherConditions;
 
@@ -74,15 +75,20 @@ public final class OutpostView extends JPanel {
     private static final Font SWITCH_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 9);
     private static final Font LANDMARK_FONT = new Font(Font.SANS_SERIF, Font.ITALIC, 11);
     private static final Font COMPASS_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 11);
-
+    private BufferedImage baseImage;
+    private BufferedImage drillImage;
+    private BufferedImage greenImage;
+    private BufferedImage panelImage;
     private static final Rectangle2D SLEEP_BUTTON = new Rectangle2D.Double(700, 550, 88, 28);
 
     // The three main resource controls. Their positions are in the 800 x 600 drawing space.
-    private static final Ellipse2D HABITAT_BUTTON = new Ellipse2D.Double(295, 125, 104, 104);
-    private static final Ellipse2D PANELS_BUTTON = new Ellipse2D.Double(118, 292, 104, 104);
-    private static final Ellipse2D GREENHOUSE_BUTTON = new Ellipse2D.Double(570, 205, 104, 104);
-    private static final Rectangle2D HEATER_SWITCH = new Rectangle2D.Double(319, 194, 56, 16);
-    private static final Rectangle2D LAMPS_SWITCH = new Rectangle2D.Double(594, 274, 56, 16);
+    // Small circular controls sit just below the reserved picture areas. Add artwork above
+    // these coordinates without needing to change the button hit areas.
+    private static final Ellipse2D DIGGER_BUTTON = new Ellipse2D.Double(309, 100, 76, 76);
+    private static final Ellipse2D PANELS_BUTTON = new Ellipse2D.Double(82, 390, 76, 76);
+    private static final Ellipse2D GREENHOUSE_BUTTON = new Ellipse2D.Double(639, 302, 76, 76);
+    private static final Rectangle2D HEATER_SWITCH = new Rectangle2D.Double(319, 314, 56, 16);
+    private static final Rectangle2D LAMPS_SWITCH = new Rectangle2D.Double(594, 384, 56, 16);
     private static final Rectangle2D HOME_BUTTON = new Rectangle2D.Double(546, 580, 84, 16);
     private static final Rectangle2D ABOUT_BUTTON = new Rectangle2D.Double(636, 580, 86, 16);
     private static final Rectangle2D RESTART_BUTTON = new Rectangle2D.Double(728, 580, 60, 16);
@@ -173,7 +179,20 @@ public final class OutpostView extends JPanel {
         try {
             backgroundImage = ImageIO.read(
                 OutpostView.class.getResource("/outpost/view/background.png")
-        );
+            );
+            baseImage = ImageIO.read(
+                OutpostView.class.getResource("/outpost/view/base.png")
+            );
+            drillImage = ImageIO.read(
+                OutpostView.class.getResource("/outpost/view/drill.png")
+            );
+            greenImage = ImageIO.read(
+                OutpostView.class.getResource("/outpost/view/greenh.png")
+            );
+            panelImage = ImageIO.read(
+                OutpostView.class.getResource("/outpost/view/panel.png")
+            );
+
     } catch (IOException e) {
         throw new IllegalStateException("Could not load background image", e);
     }
@@ -278,7 +297,18 @@ public final class OutpostView extends JPanel {
                     );
                 }
                 Draw.fit(g, getWidth(), getHeight());
+                // Custom pictures — change these numbers to move or resize them.
+                // Habitat base — stays centered
+g.drawImage(baseImage, 350, 375, 175, 150, null);
 
+// Solar — 50 pixels left
+g.drawImage(panelImage, 80, 470, 80, 50, null);
+
+// Greenhouse — 55 pixels right
+g.drawImage(greenImage, 625, 375, 105, 85, null);
+
+// Digger — 35 pixels north
+g.drawImage(drillImage, 327, 180, 60, 50, null);
                 Hint hint = hint();
                 // The tags belong to a sol in play. Under a box in the middle of the screen
                 // they would only show as cut-off pieces round its edge.
@@ -390,12 +420,6 @@ public final class OutpostView extends JPanel {
         boolean storm = radiation.solarEvent();
 
         List<Chip> all = new ArrayList<>();
-        // Keep the digger as a small secondary control. The three main resource stations
-        // are drawn as larger circular buttons below.
-        all.add(chip(Spot.DIGGER, scene.diggerAnchor, Double.POSITIVE_INFINITY, EARTH, "Digger", null,
-                List.of(new Stat(Glyphs::shield, Glyphs.SHIELD,
-                        "Shield " + Math.round(o.shield() * 100) + "%", Color.WHITE))));
-
         Card card = card();
         if (card == null) {
             return all;
@@ -436,18 +460,19 @@ public final class OutpostView extends JPanel {
     }
 
     /** Whatever {@code hint} is pointing the player at is ringed in the guide's yellow. */
-    /** The three large resource buttons, replacing the scattered one-line building tags. */
+    /** Small controls beneath the picture spaces reserved for the three outpost activities. */
     private void paintResourceButtons(Graphics2D g, Hint hint) {
         Outpost o = state.outpost();
         Readings now = state.now();
-        paintResourceButton(g, HABITAT_BUTTON, "HABITAT", "Outside " + degrees(now.outsideC()),
-                WARM, Spot.HABITAT);
-        paintResourceButton(g, PANELS_BUTTON, "SOLAR PANELS",
+        paintResourceButton(g, DIGGER_BUTTON, "DIGGER",
+                "Shield " + Math.round(o.shield() * 100) + "%", EARTH, Spot.DIGGER, null);
+        paintResourceButton(g, PANELS_BUTTON, "SOLAR",
                 Math.round(o.panelsClean() * 100) + "% clean",
-                o.panelsClean() < DUSTY_PANELS ? Glyphs.WARN : SUN_YELLOW, Spot.PANELS);
-        paintResourceButton(g, GREENHOUSE_BUTTON, "GREENHOUSE",
-                String.format(Locale.ENGLISH, "%.1f days ready", o.cropsReady()),
-                LEAF_GREEN, Spot.GREENHOUSE);
+                o.panelsClean() < DUSTY_PANELS ? Glyphs.WARN : SUN_YELLOW, Spot.PANELS, null);
+        paintResourceButton(g, GREENHOUSE_BUTTON, "GROW",
+                String.format(Locale.ENGLISH, "pH %.1f", Soil.ph(o.marsSoil())),
+                LEAF_GREEN, Spot.GREENHOUSE,
+                String.format(Locale.ENGLISH, "Food %.1fd", o.foodDays()));
 
         paintSmallSwitch(g, HEATER_SWITCH, "HEAT", o.heaterOn(), now.heaterWorking(),
                 hover.spot() == Spot.HEATER);
@@ -455,31 +480,42 @@ public final class OutpostView extends JPanel {
                 hover.spot() == Spot.LAMPS);
 
         Spot target = hint.target();
-        Ellipse2D targetArea = target == Spot.HEATER || target == Spot.HABITAT ? HABITAT_BUTTON
+        Ellipse2D targetArea = target == Spot.DIGGER ? DIGGER_BUTTON
                 : target == Spot.PANELS ? PANELS_BUTTON
-                : target == Spot.GREENHOUSE || target == Spot.LAMPS ? GREENHOUSE_BUTTON : null;
+                : target == Spot.GREENHOUSE ? GREENHOUSE_BUTTON : null;
         if (targetArea != null) {
             ring(g, new Rectangle2D.Double(targetArea.getX(), targetArea.getY(),
                     targetArea.getWidth(), targetArea.getHeight()));
         }
+        if (target == Spot.HEATER || target == Spot.HABITAT) {
+            ring(g, new Rectangle2D.Double(HEATER_SWITCH.getX() - 3, HEATER_SWITCH.getY() - 3,
+                    HEATER_SWITCH.getWidth() + 6, HEATER_SWITCH.getHeight() + 6));
+        }
+        if (target == Spot.LAMPS) {
+            ring(g, new Rectangle2D.Double(LAMPS_SWITCH.getX() - 3, LAMPS_SWITCH.getY() - 3,
+                    LAMPS_SWITCH.getWidth() + 6, LAMPS_SWITCH.getHeight() + 6));
+        }
     }
 
     private void paintResourceButton(Graphics2D g, Ellipse2D area, String title, String reading,
-                                     Color accent, Spot spot) {
+                                     Color accent, Spot spot, String secondaryReading) {
         boolean hot = hover.spot() == spot;
         g.setColor(new Color(24, 28, 44, 220));
         g.fill(area);
         g.setStroke(new java.awt.BasicStroke(hot ? 2.5f : 1.5f));
         g.setColor(hot ? Color.WHITE : Draw.alpha(accent, 220));
         g.draw(area);
-        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 10));
+        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 9));
         g.setColor(accent);
-        Draw.centred(g, title, area.getCenterX(), area.getCenterY() - 8);
-        g.setFont(Draw.BODY_FONT);
+        Draw.centred(g, title, area.getCenterX(), area.getCenterY() - 13);
+        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 10));
         g.setColor(Color.WHITE);
-        Draw.centred(g, reading, area.getCenterX(), area.getCenterY() + 10);
-        g.setFont(Draw.SMALL_FONT);
-        g.setColor(Draw.MUTED);
+        Draw.centred(g, reading, area.getCenterX(), area.getCenterY() + 1);
+        if (secondaryReading != null) {
+            g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 8));
+            g.setColor(Draw.MUTED);
+            Draw.centred(g, secondaryReading, area.getCenterX(), area.getCenterY() + 14);
+        }
     }
 
     private void paintSmallSwitch(Graphics2D g, Rectangle2D area, String label, boolean on,
@@ -838,7 +874,7 @@ public final class OutpostView extends JPanel {
         }
         if (HEATER_SWITCH.contains(x, y)) return Spot.HEATER;
         if (LAMPS_SWITCH.contains(x, y)) return Spot.LAMPS;
-        if (HABITAT_BUTTON.contains(x, y)) return Spot.HABITAT;
+        if (DIGGER_BUTTON.contains(x, y)) return Spot.DIGGER;
         if (PANELS_BUTTON.contains(x, y)) return Spot.PANELS;
         if (GREENHOUSE_BUTTON.contains(x, y)) return Spot.GREENHOUSE;
         for (Chip chip : chips()) {
@@ -1209,11 +1245,11 @@ public final class OutpostView extends JPanel {
             g.setFont(Draw.BODY_FONT);
             String warning = "You're getting cold — turn on the habitat heater";
             int warningWidth = g.getFontMetrics().stringWidth(warning) + 20;
-            Draw.box(g, HABITAT_BUTTON.getX() - 18, HABITAT_BUTTON.getY() - 27,
+            Draw.box(g, HEATER_SWITCH.getX() - 12, HEATER_SWITCH.getY() + 20,
                     warningWidth, 20, new Color(80, 24, 32, 225), Glyphs.BAD);
             g.setColor(Color.WHITE);
-            g.drawString(warning, (float) HABITAT_BUTTON.getX() - 8,
-                    (float) HABITAT_BUTTON.getY() - 13);
+            g.drawString(warning, (float) HEATER_SWITCH.getX() - 2,
+                    (float) HEATER_SWITCH.getY() + 34);
         }
 
         // A solar storm is news, so it gets a line of its own under the strip.

@@ -18,17 +18,14 @@ import outpost.shared.Readings;
 /**
  * The strip along the top of the outpost screen. It holds what the player is looking after
  * and nothing else: which sol it is and how far the Sun has got, the astronaut's health, the
- * food in the store and the energy in the battery. It draws from the GameState and changes
- * nothing.
+ * energy in the battery. Food is shown on the greenhouse control instead. It draws from the
+ * GameState and changes nothing.
  */
 final class StatusStrip {
 
     static final Rectangle2D AREA = new Rectangle2D.Double(12, 10, 776, 48);
     /** The battery's part of the strip. The view explains the moon mark when the mouse is over it. */
-    static final Rectangle2D ENERGY = new Rectangle2D.Double(572, 10, 216, 48);
-
-    /** Days of food that fill the food bar. */
-    private static final double FOOD_BAR_DAYS = 8;
+    static final Rectangle2D ENERGY = new Rectangle2D.Double(538, 10, 250, 48);
     private static final Color EMPTY_BAR = new Color(62, 66, 88);
     private static final Color BUBBLE = new Color(24, 28, 44, 222);
     private static final Color SUN = new Color(255, 205, 80);
@@ -70,8 +67,6 @@ final class StatusStrip {
                     break;
             }
         }
-        meter(g, left + 368, 192, Glyphs::leaf, Glyphs.GREENHOUSE, "Food",
-                String.format(Locale.ENGLISH, "%.1f days", o.foodDays()), o.foodDays() / FOOD_BAR_DAYS);
         paintEnergy(g, state);
     }
 
